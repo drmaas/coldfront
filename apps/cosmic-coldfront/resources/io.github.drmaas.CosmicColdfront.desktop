@@ -1,0 +1,14 @@
+[Desktop Entry]
+Name=Coldfront
+Comment=Weather, forecast, and radar
+Type=Application
+Icon=io.github.drmaas.CosmicColdfront
+Exec=cosmic-coldfront
+Terminal=false
+Categories=COSMIC;
+Keywords=COSMIC;Weather;Forecast;Radar;
+StartupNotify=true
+NoDisplay=true
+X-CosmicApplet=true
+X-CosmicHoverPopup=Auto
+X-OverflowPriority=8

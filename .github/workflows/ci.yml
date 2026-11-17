@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  web:
+    name: Web lint, test, and build
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/coldfront-web
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/coldfront-web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check generated Worker types
+        run: npx wrangler types --include-runtime false --check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  rust:
+    name: Rust format, lint, test, and applet build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        timeout-minutes: 3
+        run: |
+          # The Ubuntu image sends apt to azure.archive.ubuntu.com. DNS for
+          # that host failed for the whole job, and apt exited 100.
+          files=$(grep -l azure.archive.ubuntu.com /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true)
+          if [ -n "$files" ]; then
+            sudo sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g' $files
+          fi
+          sudo systemctl stop apt-daily.service apt-daily-upgrade.service unattended-upgrades || true
+          sudo apt-get update \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=15 \
+            -o Acquire::https::Timeout=15
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libssl-dev \
+            pkg-config \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libexpat1-dev \
+            libvulkan-dev \
+            libinput-dev \
+            libgbm-dev \
+            libudev-dev \
+            libdbus-1-dev \
+            libegl1-mesa-dev \
+            libgl1-mesa-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Build the applet
+        run: cargo build -p cosmic-coldfront --locked
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        run: |
+          curl --fail --silent --show-error --location \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            | tar --extract --gzip gitleaks
+          ./gitleaks detect --source . --redact --no-banner

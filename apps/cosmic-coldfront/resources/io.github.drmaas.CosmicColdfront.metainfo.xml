@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.drmaas.CosmicColdfront</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>Coldfront</name>
+  <summary>Weather, forecast, and radar on the COSMIC panel</summary>
+  <description>
+    <p>
+      Shows the current conditions, a short forecast, active National Weather
+      Service alerts, and a NEXRAD radar map for a US ZIP code.
+    </p>
+  </description>
+  <url type="homepage">https://github.com/drmaas/coldfront</url>
+  <url type="vcs-browser">https://github.com/drmaas/coldfront</url>
+  <launchable type="desktop-id">io.github.drmaas.CosmicColdfront.desktop</launchable>
+  <provides>
+    <binary>cosmic-coldfront</binary>
+  </provides>
+  <categories>
+    <category>Utility</category>
+  </categories>
+  <keywords>
+    <keyword>weather</keyword>
+    <keyword>radar</keyword>
+    <keyword>COSMIC</keyword>
+  </keywords>
+  <content_rating type="oars-1.1"/>
+</component>

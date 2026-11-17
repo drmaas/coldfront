@@ -1,0 +1,14 @@
+{
+  "country": "United States",
+  "country abbreviation": "US",
+  "post code": "55115",
+  "places": [
+    {
+      "place name": "Saint Paul",
+      "longitude": "-92.9391",
+      "latitude": "45.071",
+      "state": "Minnesota",
+      "state abbreviation": "MN"
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Arch Linux package for the Coldfront COSMIC applet.
+#
+# .github/workflows/release-arch.yml builds this in an Arch container when a
+# v* tag is pushed. It is not run from CI on pull requests. To build by hand
+# on Arch, from a checkout:
+#
+#   pkgver=$(sed -n 's/^pkgver=//p' arch/PKGBUILD)
+#   git archive --prefix="coldfront-$pkgver/" -o arch/"coldfront-$pkgver.tar.gz" HEAD
+#   (cd arch && makepkg -si)
+#
+# pkgver must match apps/cosmic-coldfront/Cargo.toml. scripts/check-version.sh
+# checks both against the release tag. The GitHub archive of this repository
+# unpacks to coldfront-$pkgver, not cosmic-coldfront-$pkgver.
+
+pkgname=cosmic-coldfront
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Weather, forecast, and radar applet for the COSMIC desktop'
+arch=('x86_64')
+url='https://github.com/drmaas/coldfront'
+license=('GPL-3.0-only')
+depends=(
+    'gcc-libs'
+    'glibc'
+    'wayland'
+    'libxkbcommon'
+    'fontconfig'
+    'freetype2'
+    'expat'
+    'libinput'
+)
+makedepends=(
+    'cargo'
+    'git'
+    'pkgconf'
+    'wayland'
+    'libxkbcommon'
+    'fontconfig'
+    'freetype2'
+    'expat'
+    'vulkan-headers'
+    'mesa'
+    'libinput'
+    'dbus'
+)
+# makepkg LTO flags are for C and break crates that compile C code.
+options=('!lto' '!debug')
+source=("coldfront-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+# CI substitutes an archive of the checkout, so a fixed checksum would not match.
+sha256sums=('SKIP')
+
+prepare() {
+    cd "coldfront-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd "coldfront-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo build --frozen --release -p cosmic-coldfront
+}
+
+check() {
+    cd "coldfront-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo test --frozen --release -p coldfront-core
+}
+
+package() {
+    cd "coldfront-$pkgver"
+
+    install -Dm0755 target/release/cosmic-coldfront \
+        "$pkgdir/usr/bin/cosmic-coldfront"
+    install -Dm0644 apps/cosmic-coldfront/resources/io.github.drmaas.CosmicColdfront.desktop \
+        "$pkgdir/usr/share/applications/io.github.drmaas.CosmicColdfront.desktop"
+    install -Dm0644 apps/cosmic-coldfront/resources/io.github.drmaas.CosmicColdfront.metainfo.xml \
+        "$pkgdir/usr/share/metainfo/io.github.drmaas.CosmicColdfront.metainfo.xml"
+    install -Dm0644 apps/cosmic-coldfront/resources/icons/hicolor/scalable/apps/io.github.drmaas.CosmicColdfront.svg \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.drmaas.CosmicColdfront.svg"
+    install -Dm0644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm0644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

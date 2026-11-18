@@ -77,6 +77,18 @@ impl TileCache {
         self.tiles.clear();
     }
 
+    /// Keep successful tiles from `other` without dropping entries already cached.
+    ///
+    /// Stale fetch tasks still contribute edge tiles when their generation no
+    /// longer matches, so pan does not lose work that already finished.
+    pub fn absorb(&mut self, other: &TileCache) {
+        for (key, value) in &other.tiles {
+            if let Some(bytes) = value {
+                self.tiles.insert(*key, Some(bytes.clone()));
+            }
+        }
+    }
+
     fn get(&self, key: TileKey) -> Option<&Option<Vec<u8>>> {
         self.tiles.get(&key)
     }
@@ -144,6 +156,19 @@ pub async fn ensure_map_frame(
     kind: &BasemapKind,
     request: &MapRequest,
 ) -> Result<LoadedFrame, Error> {
+    ensure_map_frames(client, cache, kind, request, &[]).await
+}
+
+/// Fetch tiles for `request` plus any extra radar offsets at the same camera,
+/// then compose the shown frame. Extra offsets fill the cache for playback
+/// after pan/zoom without restarting the whole load pipeline.
+pub async fn ensure_map_frames(
+    client: &HttpClient,
+    cache: &mut TileCache,
+    kind: &BasemapKind,
+    request: &MapRequest,
+    extra_offsets: &[u32],
+) -> Result<LoadedFrame, Error> {
     let viewport = viewport_for(
         request.latitude,
         request.longitude,
@@ -151,27 +176,34 @@ pub async fn ensure_map_frame(
         request.pan_x,
         request.pan_y,
     );
-    let frame = applet_radar_frames()
-        .into_iter()
+    let frames = applet_radar_frames();
+    let primary = frames
+        .iter()
         .find(|item| item.offset_minutes == request.offset_minutes)
         .ok_or_else(|| Error::Parse("unknown radar frame".into()))?;
-    fill_viewport_tiles(client, cache, kind, &viewport, &frame).await;
-    compose_cached(cache, kind, &viewport, request.offset_minutes, false)?
-        .ok_or_else(|| Error::Parse("map compose produced no raster".into()))
+    fill_viewport_tiles(client, cache, kind, &viewport, primary).await;
+    for offset in extra_offsets {
+        if *offset == request.offset_minutes {
+            continue;
+        }
+        let Some(frame) = frames.iter().find(|item| item.offset_minutes == *offset) else {
+            continue;
+        };
+        fill_viewport_tiles(client, cache, kind, &viewport, frame).await;
+    }
+    compose_cached(cache, kind, &viewport, request.offset_minutes)
 }
 
-/// Recompose from cache.
+/// Recompose from cache for the current camera.
 ///
-/// When `require_complete` is true, returns `Ok(None)` if any viewport tile key
-/// is still absent so the caller can keep the previous image during pan/zoom.
-/// When false, absent keys paint as holes (used after a fetch pass).
+/// Missing tiles paint as holes (pale basemap background / transparent radar),
+/// matching the web canvas path that draws only tiles already loaded.
 pub fn compose_cached(
     cache: &TileCache,
     kind: &BasemapKind,
     viewport: &MapViewport,
     offset_minutes: u32,
-    require_complete: bool,
-) -> Result<Option<LoadedFrame>, Error> {
+) -> Result<LoadedFrame, Error> {
     let basemap_layer = match kind {
         BasemapKind::MapTiler(_) => Some(TileLayer::MapTiler),
         BasemapKind::Osm => Some(TileLayer::Osm),
@@ -191,7 +223,6 @@ pub fn compose_cached(
                 y,
             };
             match cache.get(key) {
-                None if require_complete => return Ok(None),
                 None | Some(None) => basemap.push(None),
                 Some(Some(bytes)) => basemap.push(Some(bytes.clone())),
             }
@@ -205,7 +236,6 @@ pub fn compose_cached(
             y,
         };
         match cache.get(key) {
-            None if require_complete => return Ok(None),
             None | Some(None) => radar.push(None),
             Some(Some(bytes)) => {
                 radar_tiles += 1;
@@ -214,13 +244,13 @@ pub fn compose_cached(
         }
     }
     let raster = compose_viewport(viewport, &basemap, &radar)?;
-    Ok(Some(LoadedFrame {
+    Ok(LoadedFrame {
         offset_minutes,
         width: raster.width,
         height: raster.height,
         pixels: raster.pixels,
         radar_tiles,
-    }))
+    })
 }
 
 async fn fill_viewport_tiles(

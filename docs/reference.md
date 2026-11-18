@@ -128,7 +128,7 @@ Until the first frame draws radar pixels, the card says "Loading radar…". If t
 
 ### Applet
 
-The Radar tab uses `map_viewport` and `compose_viewport`. The camera starts at zoom 7 with zero pan. Zoom stays from 5 to 11. Drag pans. Mouse wheel zooms. Trackpad pixel scroll pans; Ctrl plus scroll zooms. Zoom in/out and recenter buttons sit under the map. View size is 800 by 480. Tiles are cached by source, zoom, and coordinates; pan recomposites from cache when tiles are present, and a short settle delay fetches newly visible edge tiles. Failed tile fetches stay absent so the next settle can retry.
+The Radar tab uses `map_viewport` and `compose_viewport`. The camera starts at zoom 7 with zero pan. Zoom stays from 5 to 11. Drag pans. Mouse wheel zooms. Trackpad pixel scroll pans; Ctrl plus scroll zooms. Zoom in/out and recenter buttons sit under the map. View size is 800 by 480. Tiles are cached by source, zoom, and coordinates. Every pan/zoom recomposites basemap and radar together from whatever tiles are already cached (missing cells stay holes), matching the web canvas paint path. A 50 ms settle debounce fetches newly visible edge tiles for the shown frame and every frame already ready, without blanking the map. Failed tile fetches stay absent so the next settle can retry. Stale fetch tasks still merge successful tiles into the cache.
 
 `compose_radar_map` still paints a pale background (`213, 227, 236`), blits basemap and radar tiles, crops around the pin, and resizes to 400 by 260. That path stays for unit and contract tests. The interactive tab does not use it.
 

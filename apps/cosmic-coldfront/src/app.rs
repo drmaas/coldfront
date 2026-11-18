@@ -32,7 +32,9 @@ const POPUP_MAX_HEIGHT: f32 = 720.0;
 const RADAR_POPUP_WIDTH: f32 = 960.0;
 const RADAR_POPUP_HEIGHT: f32 = 820.0;
 const WEATHER_REFRESH: Duration = Duration::from_secs(30 * 60);
-const MAP_SETTLE: Duration = Duration::from_millis(150);
+/// Debounce before fetching newly visible edge tiles. Short so pan feels like
+/// the web canvas (tiles stream in while the camera moves).
+const MAP_SETTLE: Duration = Duration::from_millis(50);
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum PopupTab {
@@ -376,12 +378,13 @@ impl cosmic::Application for AppModel {
                     self.pan_x = drag.pan_x + f64::from(point.x - drag.start.x);
                     self.pan_y = drag.pan_y + f64::from(point.y - drag.start.y);
                     self.recompose_current();
+                    return self.schedule_settle();
                 }
             }
             Message::MapScroll(delta) => return self.handle_scroll(delta),
             Message::MapSettle(token) => {
                 if token == self.settle_token {
-                    return self.reload_map(false);
+                    return self.refresh_visible_map();
                 }
             }
             Message::Modifiers(modifiers) => self.ctrl_held = modifiers.control(),
@@ -427,10 +430,10 @@ impl cosmic::Application for AppModel {
                 pending,
                 cache,
             } => {
+                self.tile_cache.absorb(&cache);
                 if generation != self.map_generation {
                     return Task::none();
                 }
-                self.tile_cache = *cache;
                 self.map_loading = false;
                 self.pending_offsets = pending;
                 self.apply_frame(*frame, zoom, pan_x, pan_y);
@@ -445,11 +448,11 @@ impl cosmic::Application for AppModel {
                 frame,
                 cache,
             } => {
+                self.tile_cache.absorb(&cache);
                 if generation != self.map_generation {
                     return Task::none();
                 }
                 self.finish_pending(offset_minutes);
-                self.tile_cache = *cache;
                 self.apply_frame(*frame, zoom, pan_x, pan_y);
                 return self.load_next_frame();
             }
@@ -468,7 +471,10 @@ impl cosmic::Application for AppModel {
             } => {
                 if generation == self.map_generation {
                     self.map_loading = false;
-                    self.map_error = Some(message);
+                    // Keep a painted map after a soft edge-tile refresh fails.
+                    if self.map_handle.is_none() {
+                        self.map_error = Some(message);
+                    }
                 }
             }
         }
@@ -621,7 +627,8 @@ impl AppModel {
             self.frames_ready.clear();
             self.map_handle = None;
         }
-        self.map_loading = true;
+        // Keep the last composite on screen while edge tiles refill after pan.
+        self.map_loading = self.map_handle.is_none();
         self.map_error = None;
         let kind = basemap_kind(&self.config);
         let zoom = self.zoom;
@@ -788,8 +795,8 @@ impl AppModel {
             self.pan_y,
         );
         let kind = basemap_kind(&self.config);
-        let Ok(Some(frame)) =
-            mapload::compose_cached(&self.tile_cache, &kind, &viewport, self.shown_offset, true)
+        let Ok(frame) =
+            mapload::compose_cached(&self.tile_cache, &kind, &viewport, self.shown_offset)
         else {
             return;
         };
@@ -799,6 +806,78 @@ impl AppModel {
             frame.height,
             frame.pixels,
         ));
+    }
+
+    /// Fetch tiles for the current camera without blanking the shown map.
+    ///
+    /// First load still goes through `reload_map`. Later pan/zoom settles fill
+    /// edge tiles for the shown frame and every frame already ready, then
+    /// recompose so basemap and radar stay locked.
+    fn refresh_visible_map(&mut self) -> Task<cosmic::Action<Message>> {
+        if self.map_handle.is_none() || self.frames_ready.is_empty() {
+            return self.reload_map(false);
+        }
+        let Some(place) = self.place.clone() else {
+            return Task::none();
+        };
+        self.map_generation = self.map_generation.wrapping_add(1);
+        let generation = self.map_generation;
+        self.map_error = None;
+        let kind = basemap_kind(&self.config);
+        let zoom = self.zoom;
+        let pan_x = self.pan_x;
+        let pan_y = self.pan_y;
+        let shown_offset = self.shown_offset;
+        let extra_offsets: Vec<u32> = self
+            .frames_ready
+            .iter()
+            .copied()
+            .filter(|offset| *offset != shown_offset)
+            .collect();
+        // Same order as reload_map: `.last()` loads next, so reverse chrono.
+        let pending: Vec<u32> = applet_radar_frames()
+            .into_iter()
+            .rev()
+            .map(|frame| frame.offset_minutes)
+            .filter(|offset| !self.frames_ready.contains(offset) && *offset != shown_offset)
+            .collect();
+        let mut cache = self.tile_cache.clone();
+        cosmic::task::future(async move {
+            let client = match HttpClient::new() {
+                Ok(client) => client,
+                Err(error) => {
+                    return Message::MapFailed {
+                        generation,
+                        message: error.to_string(),
+                    };
+                }
+            };
+            let request = mapload::MapRequest {
+                latitude: place.latitude,
+                longitude: place.longitude,
+                zoom,
+                pan_x,
+                pan_y,
+                offset_minutes: shown_offset,
+            };
+            match mapload::ensure_map_frames(&client, &mut cache, &kind, &request, &extra_offsets)
+                .await
+            {
+                Ok(frame) => Message::MapReady {
+                    generation,
+                    zoom,
+                    pan_x,
+                    pan_y,
+                    frame: Box::new(frame),
+                    pending,
+                    cache: Box::new(cache),
+                },
+                Err(error) => Message::MapFailed {
+                    generation,
+                    message: error.to_string(),
+                },
+            }
+        })
     }
 
     fn advance_radar(&mut self) {

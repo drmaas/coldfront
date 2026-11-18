@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use cosmic::iced::keyboard::{self, Modifiers};
+use cosmic::iced::mouse::Button as MouseButton;
 use cosmic::iced::mouse::ScrollDelta;
 use cosmic::iced::platform_specific::shell::wayland::commands::popup::{destroy_popup, get_popup};
 use cosmic::iced::window::{self, Id};
@@ -29,7 +30,7 @@ pub const APP_ID: &str = "io.github.drmaas.CosmicColdfront";
 const POPUP_WIDTH: f32 = 480.0;
 const POPUP_MAX_HEIGHT: f32 = 720.0;
 const RADAR_POPUP_WIDTH: f32 = 960.0;
-const RADAR_POPUP_HEIGHT: f32 = 700.0;
+const RADAR_POPUP_HEIGHT: f32 = 820.0;
 const WEATHER_REFRESH: Duration = Duration::from_secs(30 * 60);
 const MAP_SETTLE: Duration = Duration::from_millis(150);
 
@@ -128,17 +129,25 @@ pub enum Message {
     },
     MapReady {
         generation: u64,
+        zoom: u32,
+        pan_x: f64,
+        pan_y: f64,
         frame: Box<LoadedFrame>,
         pending: Vec<u32>,
         cache: Box<TileCache>,
     },
     OlderFrame {
         generation: u64,
+        zoom: u32,
+        pan_x: f64,
+        pan_y: f64,
+        offset_minutes: u32,
         frame: Box<LoadedFrame>,
         cache: Box<TileCache>,
     },
     FrameSkipped {
         generation: u64,
+        offset_minutes: u32,
     },
     MapFailed {
         generation: u64,
@@ -228,6 +237,9 @@ impl cosmic::Application for AppModel {
             event::listen_with(|event, _status, _id| match event {
                 Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                     Some(Message::Modifiers(modifiers))
+                }
+                Event::Mouse(cosmic::iced::mouse::Event::ButtonReleased(MouseButton::Left)) => {
+                    Some(Message::MapRelease)
                 }
                 _ => None,
             }),
@@ -376,6 +388,10 @@ impl cosmic::Application for AppModel {
                 if loaded.generation != self.generation {
                     return Task::none();
                 }
+                let place_changed = self.place.as_ref().is_none_or(|place| {
+                    (place.latitude - loaded.bundle.place.latitude).abs() > f64::EPSILON
+                        || (place.longitude - loaded.bundle.place.longitude).abs() > f64::EPSILON
+                });
                 self.place = Some(loaded.bundle.place);
                 self.forecast = Some(loaded.bundle.forecast);
                 self.alerts = loaded.bundle.alerts;
@@ -383,7 +399,8 @@ impl cosmic::Application for AppModel {
                 self.refresh_failed = false;
                 self.map_error = None;
                 if self.active_tab == PopupTab::Radar || self.radar_opened {
-                    return self.reload_map(true);
+                    let clear_cache = place_changed || self.map_handle.is_none();
+                    return self.reload_map(clear_cache);
                 }
             }
             Message::WeatherFailed {
@@ -402,6 +419,9 @@ impl cosmic::Application for AppModel {
             }
             Message::MapReady {
                 generation,
+                zoom,
+                pan_x,
+                pan_y,
                 frame,
                 pending,
                 cache,
@@ -412,23 +432,32 @@ impl cosmic::Application for AppModel {
                 self.tile_cache = *cache;
                 self.map_loading = false;
                 self.pending_offsets = pending;
-                self.apply_frame(*frame);
+                self.apply_frame(*frame, zoom, pan_x, pan_y);
                 return self.load_next_frame();
             }
             Message::OlderFrame {
                 generation,
+                zoom,
+                pan_x,
+                pan_y,
+                offset_minutes,
                 frame,
                 cache,
             } => {
                 if generation != self.map_generation {
                     return Task::none();
                 }
+                self.finish_pending(offset_minutes);
                 self.tile_cache = *cache;
-                self.apply_frame(*frame);
+                self.apply_frame(*frame, zoom, pan_x, pan_y);
                 return self.load_next_frame();
             }
-            Message::FrameSkipped { generation } => {
+            Message::FrameSkipped {
+                generation,
+                offset_minutes,
+            } => {
                 if generation == self.map_generation {
+                    self.finish_pending(offset_minutes);
                     return self.load_next_frame();
                 }
             }
@@ -466,7 +495,7 @@ impl AppModel {
             .get_popup_settings(parent, id, None, None, None);
         settings.positioner.size_limits = self.popup_limits();
         let open = get_popup(settings);
-        if self.forecast.is_none() && is_us_zip(&self.config.zip) {
+        if self.forecast.is_none() && is_us_zip(&self.config.zip) && !self.weather_loading {
             Task::batch([open, self.start_weather_load(false)])
         } else {
             open
@@ -524,14 +553,17 @@ impl AppModel {
         self.popup_limits()
     }
 
-    fn start_weather_load(&mut self, clear_map: bool) -> Task<cosmic::Action<Message>> {
+    fn start_weather_load(&mut self, zip_changed: bool) -> Task<cosmic::Action<Message>> {
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
         self.weather_loading = true;
         self.refresh_failed = false;
         self.map_error = None;
-        if clear_map {
+        if zip_changed {
             self.reset_map_state();
+            self.place = None;
+            self.forecast = None;
+            self.alerts.clear();
         }
         let zip = self.config.zip.clone();
         if !is_us_zip(&zip) {
@@ -641,6 +673,9 @@ impl AppModel {
                     }
                     Message::MapReady {
                         generation,
+                        zoom,
+                        pan_x,
+                        pan_y,
                         frame: Box::new(frame),
                         pending,
                         cache: Box::new(cache),
@@ -655,7 +690,7 @@ impl AppModel {
     }
 
     fn load_next_frame(&mut self) -> Task<cosmic::Action<Message>> {
-        let Some(offset) = self.pending_offsets.pop() else {
+        let Some(&offset) = self.pending_offsets.last() else {
             return Task::none();
         };
         let Some(place) = self.place.clone() else {
@@ -670,7 +705,12 @@ impl AppModel {
         cosmic::task::future(async move {
             let client = match HttpClient::new() {
                 Ok(client) => client,
-                Err(_) => return Message::FrameSkipped { generation },
+                Err(_) => {
+                    return Message::FrameSkipped {
+                        generation,
+                        offset_minutes: offset,
+                    };
+                }
             };
             let request = mapload::MapRequest {
                 latitude: place.latitude,
@@ -683,16 +723,35 @@ impl AppModel {
             match mapload::ensure_map_frame(&client, &mut cache, &kind, &request).await {
                 Ok(frame) => Message::OlderFrame {
                     generation,
+                    zoom,
+                    pan_x,
+                    pan_y,
+                    offset_minutes: offset,
                     frame: Box::new(frame),
                     cache: Box::new(cache),
                 },
-                Err(_) => Message::FrameSkipped { generation },
+                Err(_) => Message::FrameSkipped {
+                    generation,
+                    offset_minutes: offset,
+                },
             }
         })
     }
 
-    fn apply_frame(&mut self, frame: LoadedFrame) {
-        self.radar_tiles = self.radar_tiles.max(frame.radar_tiles);
+    fn finish_pending(&mut self, offset_minutes: u32) {
+        if self.pending_offsets.last() == Some(&offset_minutes) {
+            self.pending_offsets.pop();
+        } else {
+            self.pending_offsets
+                .retain(|offset| *offset != offset_minutes);
+        }
+    }
+
+    fn camera_matches(&self, zoom: u32, pan_x: f64, pan_y: f64) -> bool {
+        zoom == self.zoom && (pan_x - self.pan_x).abs() < 0.5 && (pan_y - self.pan_y).abs() < 0.5
+    }
+
+    fn apply_frame(&mut self, frame: LoadedFrame, zoom: u32, pan_x: f64, pan_y: f64) {
         if !self.frames_ready.contains(&frame.offset_minutes) {
             self.frames_ready.push(frame.offset_minutes);
             self.frames_ready.sort_unstable();
@@ -700,14 +759,18 @@ impl AppModel {
         if self.frames_ready.len() == 1 {
             self.shown_offset = frame.offset_minutes;
         }
+        if !self.camera_matches(zoom, pan_x, pan_y) {
+            self.recompose_current();
+            return;
+        }
         if self.shown_offset == frame.offset_minutes {
+            self.radar_tiles = frame.radar_tiles;
             self.map_handle = Some(cosmic::iced::widget::image::Handle::from_rgba(
                 frame.width,
                 frame.height,
                 frame.pixels,
             ));
         } else {
-            // Keep cache warm for playback; shown frame recomposes from tiles.
             self.recompose_current();
         }
     }
@@ -724,16 +787,17 @@ impl AppModel {
             self.pan_y,
         );
         let kind = basemap_kind(&self.config);
-        if let Ok(frame) =
-            mapload::compose_cached(&self.tile_cache, &kind, &viewport, self.shown_offset)
-        {
-            self.radar_tiles = frame.radar_tiles;
-            self.map_handle = Some(cosmic::iced::widget::image::Handle::from_rgba(
-                frame.width,
-                frame.height,
-                frame.pixels,
-            ));
-        }
+        let Ok(Some(frame)) =
+            mapload::compose_cached(&self.tile_cache, &kind, &viewport, self.shown_offset, true)
+        else {
+            return;
+        };
+        self.radar_tiles = frame.radar_tiles;
+        self.map_handle = Some(cosmic::iced::widget::image::Handle::from_rgba(
+            frame.width,
+            frame.height,
+            frame.pixels,
+        ));
     }
 
     fn advance_radar(&mut self) {
@@ -759,9 +823,10 @@ impl AppModel {
         if zoom == self.zoom {
             return Task::none();
         }
+        let scale = 2f64.powi(zoom as i32 - self.zoom as i32);
+        self.pan_x *= scale;
+        self.pan_y *= scale;
         self.zoom = zoom;
-        self.pan_x = 0.0;
-        self.pan_y = 0.0;
         self.recompose_current();
         self.schedule_settle()
     }
@@ -854,6 +919,10 @@ impl AppModel {
 
     pub(crate) fn map_size(&self) -> (u32, u32) {
         (MAP_VIEW_WIDTH, MAP_VIEW_HEIGHT)
+    }
+
+    pub(crate) fn dragging(&self) -> bool {
+        self.drag.is_some()
     }
 }
 

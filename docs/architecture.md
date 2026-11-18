@@ -124,13 +124,13 @@ Worker details, cache headers, and validation: [Worker API](reference.md#worker-
 
 App id `io.github.drmaas.CosmicColdfront`. `init` reads cosmic-config and does not fetch. After startup, a valid saved ZIP loads place, forecast, and alerts so the panel icon and temperature match. Closing the popup keeps memory; reopening does not refetch weather when `forecast` is set. Radar tiles load when the Radar tab opens.
 
-Popup tabs are Current, Radar, Hourly, and 10-day. Settings opens from the header gear. Current, Hourly, 10-day, and Settings use a 480px-wide popup. Radar resizes that popup to about 960×700. Invalid ZIP bumps `generation`, clears the map, and returns with no network. Alert HTTP failure becomes an empty list. A failed weather refresh keeps the last forecast. Stale `generation` / `map_generation` results are ignored.
+Popup tabs are Current, Radar, Hourly, and 10-day. Settings opens from the header gear. Current, Hourly, 10-day, and Settings use a 480px-wide popup. Radar resizes that popup to about 960×820. Invalid ZIP bumps `generation`, clears place and forecast, and returns with no network. Alert HTTP failure becomes an empty list. A failed same-ZIP refresh keeps the last forecast. Stale `generation` / `map_generation` results are ignored.
 
 Config version 1: `zip`, `fahrenheit` (default true), `maptiler_api_key`, `allow_osm_basemap` (default false). Unit changes save without reload. ZIP changes refetch weather. Key and OSM toggle reload the map after the Radar tab has been opened.
 
 ## Radar and basemap
 
-Both clients draw IEM NEXRAD tiles. Web uses a 2D canvas (zoom 5–11, twelve frames at 750 ms). Applet Radar tab composites into an 880×520 viewport (zoom 5–11, pan/zoom gestures, offsets 50…0, 800 ms loop while the Radar tab is open). `compose_radar_map` (400×260) remains for contract tests. Frame lists and layer names: [Radar](reference.md#radar).
+Both clients draw IEM NEXRAD tiles. Web uses a 2D canvas (zoom 5–11, twelve frames at 750 ms). Applet Radar tab composites into an 800×480 viewport (zoom 5–11, pan/zoom gestures, offsets 50…0, 800 ms loop while the Radar tab is open) inside a ~960×820 popup. `compose_radar_map` (400×260) remains for contract tests. Frame lists and layer names: [Radar](reference.md#radar).
 
 ```mermaid
 flowchart TD

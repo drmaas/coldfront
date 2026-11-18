@@ -14,8 +14,8 @@ use coldfront_core::{
     osm_tile_url,
 };
 
-pub const MAP_VIEW_WIDTH: u32 = 880;
-pub const MAP_VIEW_HEIGHT: u32 = 520;
+pub const MAP_VIEW_WIDTH: u32 = 800;
+pub const MAP_VIEW_HEIGHT: u32 = 480;
 const TILE_MARGIN: u32 = 1;
 
 #[derive(Clone)]
@@ -81,8 +81,13 @@ impl TileCache {
         self.tiles.get(&key)
     }
 
-    fn insert(&mut self, key: TileKey, value: Option<Vec<u8>>) {
-        self.tiles.insert(key, value);
+    fn insert_ok(&mut self, key: TileKey, bytes: Vec<u8>) {
+        self.tiles.insert(key, Some(bytes));
+    }
+
+    /// True when the cache has no successful tile yet (absent or prior miss).
+    fn needs_fetch(&self, key: TileKey) -> bool {
+        !matches!(self.get(key), Some(Some(_)))
     }
 }
 
@@ -131,7 +136,8 @@ pub struct MapRequest {
 }
 
 /// Fetch any tiles missing from the cache for the current viewport and frame,
-/// then compose the visible raster.
+/// then compose the visible raster. Failed fetches stay absent so the next
+/// settle can retry; holes paint as transparent / pale background.
 pub async fn ensure_map_frame(
     client: &HttpClient,
     cache: &mut TileCache,
@@ -150,17 +156,22 @@ pub async fn ensure_map_frame(
         .find(|item| item.offset_minutes == request.offset_minutes)
         .ok_or_else(|| Error::Parse("unknown radar frame".into()))?;
     fill_viewport_tiles(client, cache, kind, &viewport, &frame).await;
-    compose_cached(cache, kind, &viewport, request.offset_minutes)
+    compose_cached(cache, kind, &viewport, request.offset_minutes, false)?
+        .ok_or_else(|| Error::Parse("map compose produced no raster".into()))
 }
 
-/// Recompose from cache only. Returns `None` when required tiles are still missing
-/// from the cache map (not when a tile fetch failed — those are stored as `None`).
+/// Recompose from cache.
+///
+/// When `require_complete` is true, returns `Ok(None)` if any viewport tile key
+/// is still absent so the caller can keep the previous image during pan/zoom.
+/// When false, absent keys paint as holes (used after a fetch pass).
 pub fn compose_cached(
     cache: &TileCache,
     kind: &BasemapKind,
     viewport: &MapViewport,
     offset_minutes: u32,
-) -> Result<LoadedFrame, Error> {
+    require_complete: bool,
+) -> Result<Option<LoadedFrame>, Error> {
     let basemap_layer = match kind {
         BasemapKind::MapTiler(_) => Some(TileLayer::MapTiler),
         BasemapKind::Osm => Some(TileLayer::Osm),
@@ -179,7 +190,11 @@ pub fn compose_cached(
                 x,
                 y,
             };
-            basemap.push(cache.get(key).and_then(Option::as_ref).cloned());
+            match cache.get(key) {
+                None if require_complete => return Ok(None),
+                None | Some(None) => basemap.push(None),
+                Some(Some(bytes)) => basemap.push(Some(bytes.clone())),
+            }
         } else {
             basemap.push(None);
         }
@@ -189,20 +204,23 @@ pub fn compose_cached(
             x,
             y,
         };
-        let tile = cache.get(key).and_then(Option::as_ref).cloned();
-        if tile.is_some() {
-            radar_tiles += 1;
+        match cache.get(key) {
+            None if require_complete => return Ok(None),
+            None | Some(None) => radar.push(None),
+            Some(Some(bytes)) => {
+                radar_tiles += 1;
+                radar.push(Some(bytes.clone()));
+            }
         }
-        radar.push(tile);
     }
     let raster = compose_viewport(viewport, &basemap, &radar)?;
-    Ok(LoadedFrame {
+    Ok(Some(LoadedFrame {
         offset_minutes,
         width: raster.width,
         height: raster.height,
         pixels: raster.pixels,
         radar_tiles,
-    })
+    }))
 }
 
 async fn fill_viewport_tiles(
@@ -222,7 +240,7 @@ async fn fill_viewport_tiles(
                     x,
                     y,
                 };
-                if cache.get(tile_key).is_none() {
+                if cache.needs_fetch(tile_key) {
                     missing.push((tile_key, maptiler_tile_url(viewport.zoom, x, y, key)));
                 }
             }
@@ -233,7 +251,7 @@ async fn fill_viewport_tiles(
                     x,
                     y,
                 };
-                if cache.get(tile_key).is_none() {
+                if cache.needs_fetch(tile_key) {
                     missing.push((tile_key, osm_tile_url(viewport.zoom, x, y)));
                 }
             }
@@ -247,7 +265,7 @@ async fn fill_viewport_tiles(
             x,
             y,
         };
-        if cache.get(radar_key).is_none() {
+        if cache.needs_fetch(radar_key) {
             missing.push((radar_key, iem_tile_url(&frame.layer, viewport.zoom, x, y)));
         }
     }
@@ -259,6 +277,9 @@ async fn fill_viewport_tiles(
         async move { (key, client.get_bytes(&url).await.ok()) }
     });
     for (key, bytes) in futures::future::join_all(downloads).await {
-        cache.insert(key, bytes);
+        // Leave failures absent so the next settle can retry.
+        if let Some(bytes) = bytes {
+            cache.insert_ok(key, bytes);
+        }
     }
 }

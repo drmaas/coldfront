@@ -19,7 +19,7 @@ Change a shared rule in Rust, in TypeScript, and in `fixtures/contract.json` in 
 | Web Mercator tile math | `lat_lon_to_tile`, `tile_window` | yes |
 | IEM tile URL and radar frame lists | `iem_tile_url`, `web_radar_frames`, `applet_radar_frames` | yes |
 | HTTP to upstream hosts | `HttpClient` or the Worker | no |
-| Painted map | `compose_radar_map` or `RadarMap.tsx` | no |
+| Painted map | `compose_radar_map`, `compose_viewport`, or `RadarMap.tsx` | no |
 | Hourly chart and daily range bar | `chartPoints`, `rangePlacement` | no |
 | Panel icon names | `symbolic_icon` | no |
 
@@ -128,7 +128,7 @@ Until the first frame draws radar pixels, the card says "Loading radar…". If t
 
 ### Applet
 
-The Radar tab uses `map_viewport` and `compose_viewport`. The camera starts at zoom 7 with zero pan. Zoom stays from 5 to 11. Drag pans. Mouse wheel zooms. Trackpad pixel scroll pans; Ctrl plus scroll zooms. Zoom in/out and recenter buttons sit under the map. View size is 880 by 520. Tiles are cached by source, zoom, and coordinates; pan recomposites from cache, and a short settle delay fetches newly visible edge tiles.
+The Radar tab uses `map_viewport` and `compose_viewport`. The camera starts at zoom 7 with zero pan. Zoom stays from 5 to 11. Drag pans. Mouse wheel zooms. Trackpad pixel scroll pans; Ctrl plus scroll zooms. Zoom in/out and recenter buttons sit under the map. View size is 800 by 480. Tiles are cached by source, zoom, and coordinates; pan recomposites from cache when tiles are present, and a short settle delay fetches newly visible edge tiles. Failed tile fetches stay absent so the next settle can retry.
 
 `compose_radar_map` still paints a pale background (`213, 227, 236`), blits basemap and radar tiles, crops around the pin, and resizes to 400 by 260. That path stays for unit and contract tests. The interactive tab does not use it.
 

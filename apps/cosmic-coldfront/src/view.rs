@@ -285,18 +285,26 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
             .into()
     } else if app.map_loading || app.weather_loading {
         map_placeholder(fl!("loading-radar"), width, height)
+    } else if let Some(error) = &app.map_error {
+        map_placeholder(error.clone(), width, height)
     } else if !is_us_zip(&app.config.zip) {
         map_placeholder(fl!("enter-zip"), width, height)
     } else {
         map_placeholder(fl!("loading-radar"), width, height)
     };
 
+    let interaction = if app.dragging() {
+        mouse::Interaction::Grabbing
+    } else {
+        mouse::Interaction::Grab
+    };
     let map = widget::mouse_area(map)
         .on_press(Message::MapPress)
         .on_release(Message::MapRelease)
         .on_move(Message::MapMove)
+        .on_exit(Message::MapRelease)
         .on_scroll(Message::MapScroll)
-        .interaction(mouse::Interaction::Grab);
+        .interaction(interaction);
 
     let zoom_controls = widget::Row::new()
         .spacing(spacing.space_xxs)
@@ -375,7 +383,12 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
 fn hourly_tab(app: &AppModel) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
     let Some(forecast) = &app.forecast else {
-        return widget::text::body(fl!("loading")).into();
+        let label = if app.weather_loading {
+            fl!("loading")
+        } else {
+            fl!("enter-zip")
+        };
+        return widget::text::body(label).into();
     };
     let mut list = widget::list_column();
     for (index, hour) in next_hours(forecast, 24).into_iter().enumerate() {
@@ -403,7 +416,12 @@ fn hourly_tab(app: &AppModel) -> Element<'_, Message> {
 fn forecast_tab(app: &AppModel) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
     let Some(forecast) = &app.forecast else {
-        return widget::text::body(fl!("loading")).into();
+        let label = if app.weather_loading {
+            fl!("loading")
+        } else {
+            fl!("enter-zip")
+        };
+        return widget::text::body(label).into();
     };
     let today = forecast
         .current

@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "coldfront",
+  "account_id": "a81a808a57ade2b15053bf022e284425",
   "compatibility_date": "2026-11-17",
   // Keep legacy registry until @cloudflare/vite-plugin stops asserting on node:process
   // under the default new_module_registry (workers-sdk#16381).

@@ -82,23 +82,35 @@ CI on pull requests and on `main` runs three jobs:
 - Rust: fmt, clippy `-D warnings`, `cargo test --workspace --locked`. Clippy and tests already compile the applet, so CI does not run a separate `cargo build`.
 - Secret scan: gitleaks.
 
-CI does not deploy the site. CI does not build the Arch package.
+After CI succeeds on a push to `main`, `.github/workflows/deploy.yml` builds the web app and runs `wrangler deploy`. Manual deploys still work. CI does not build the Arch package.
 
 ## Deploy the web app
 
-Deploy is manual. From `apps/coldfront-web`, after `pnpm exec wrangler login`:
+### From GitHub Actions
+
+A successful CI run on a push to `main` deploys the Worker. Set repository secret `CLOUDFLARE_API_TOKEN` first. The token needs Workers Scripts Edit on this account. Create one with the [Workers Scripts token template](https://dash.cloudflare.com/?to=/:account/api-tokens&permissionGroupKeys=%5B%7B%22key%22%3A%22workers_scripts%22%2C%22type%22%3A%22edit%22%7D%5D&name=coldfront%20GitHub%20Actions), then:
+
+```bash
+gh secret set CLOUDFLARE_API_TOKEN --repo drmaas/coldfront
+```
+
+`account_id` is in `apps/coldfront-web/wrangler.jsonc`. Keep the API token out of that file. You can also start a deploy from the Actions tab with `workflow_dispatch`.
+
+### From your machine
+
+From `apps/coldfront-web`, after `pnpm exec wrangler login`:
 
 ```bash
 pnpm exec wrangler secret put MAPTILER_API_KEY
 pnpm run build && pnpm exec wrangler deploy
 ```
 
-Skip the secret when the site should serve radar without a street map. The key is not in `wrangler.jsonc`. A missing secret must not fail the deploy.
+Skip the MapTiler secret when the site should serve radar without a street map. The key is not in `wrangler.jsonc`. A missing MapTiler secret must not fail the deploy. Worker secrets survive later deploys.
 
 > [!WARNING]
-> Do not put `MAPTILER_API_KEY` in source, `wrangler.jsonc`, or any env file you commit.
+> Do not put `MAPTILER_API_KEY` or `CLOUDFLARE_API_TOKEN` in source, `wrangler.jsonc`, or any env file you commit.
 
-`compatibility_date` is `2026-11-17`. Workers Logs are enabled. Traces are sampled at 1 percent. The Worker name is `coldfront`.
+`compatibility_date` is `2026-11-17`. Workers Logs are enabled. Traces are sampled at 1 percent. The Worker name is `coldfront`. Live URL: `https://coldfront.drmaas.workers.dev`.
 
 ## Release the applet
 

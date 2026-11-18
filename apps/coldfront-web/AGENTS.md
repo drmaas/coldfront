@@ -16,7 +16,7 @@ Do not add applet UI here. Do not call `coldfront-core` from this package. Keep 
 - Do not fetch Zippopotam, Open-Meteo, National Weather Service, or MapTiler from a component. Call `/api/*`.
 - IEM radar tiles load in the browser from `iemTileUrl`. Do not proxy them through the Worker unless the architecture file changes too.
 - `MAPTILER_API_KEY` stays a Worker secret. `/api/config` returns `basemap` only. Never return the key.
-- Do not declare that secret in `wrangler.jsonc`. An empty key must still deploy.
+- Do not declare that secret in `wrangler.jsonc`. An empty key must still deploy. `account_id` in `wrangler.jsonc` is fine.
 - Do not log upstream URLs.
 - Accept only `GET` and `HEAD` on `/api/*`.
 - Keep cache lifetimes: ZIP and map tiles 86400 seconds, forecast 300, alerts 60, config and errors `no-store`.

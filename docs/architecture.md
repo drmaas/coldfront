@@ -172,7 +172,7 @@ flowchart TD
 - No database, accounts, or shared session.
 - Web state is the URL, `localStorage` units, and memory. Applet settings are cosmic-config. Forecasts are memory only in both.
 - Worker is the only web credential boundary. Applet holds an optional key in the environment or cosmic-config.
-- CI runs tests and builds. It does not deploy the Worker. Arch package builds only on a `v*` tag.
+- CI runs tests and builds. After a successful CI run on a push to `main`, `deploy.yml` deploys the Worker. Arch package builds only on a `v*` tag.
 - Release version equality is the git tag, `apps/cosmic-coldfront` `version`, and `arch/PKGBUILD` `pkgver`. Core and web package versions are independent.
 - Crates are `publish = false`. License is GPL-3.0-only, matching libcosmic.
 

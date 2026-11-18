@@ -27,11 +27,11 @@ export function WeatherIcon({ name }: IconProps) {
 export function ColdFront({ className = "front" }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 72 16" aria-hidden="true">
-      <path d="M0 5 H72" stroke="#2563eb" strokeWidth="1.5" />
-      <path d="M6 5 L12 14 L18 5 Z" fill="#2563eb" />
-      <path d="M24 5 L30 14 L36 5 Z" fill="#2563eb" />
-      <path d="M42 5 L48 14 L54 5 Z" fill="#2563eb" />
-      <path d="M60 5 L66 14 L72 5 Z" fill="#2563eb" />
+      <path d="M0 5 H72" stroke="var(--accent)" strokeWidth="1.5" />
+      <path d="M6 5 L12 14 L18 5 Z" fill="var(--accent)" />
+      <path d="M24 5 L30 14 L36 5 Z" fill="var(--accent)" />
+      <path d="M42 5 L48 14 L54 5 Z" fill="var(--accent)" />
+      <path d="M60 5 L66 14 L72 5 Z" fill="var(--accent)" />
     </svg>
   );
 }

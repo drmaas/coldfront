@@ -20,16 +20,34 @@ import {
 } from "../lib/domain";
 import { ColdFront, WeatherIcon, Wordmark } from "./icons";
 import { RadarMap } from "./RadarMap";
+import {
+  applyResolvedTheme,
+  readThemePreference,
+  resolveTheme,
+  writeThemePreference,
+  type ThemePreference,
+} from "./theme";
 
 type Units = "F" | "C";
 
 export function App() {
   const path = usePath();
   const [units, setUnits] = useUnits();
+  const [theme, setTheme] = useTheme();
   const zip = path === "/" ? null : path.slice(1);
   return (
     <>
-      {zip === null ? <Landing /> : <ForecastPage zip={decodeURIComponent(zip)} units={units} onUnits={setUnits} />}
+      {zip === null ? (
+        <Landing theme={theme} onTheme={setTheme} />
+      ) : (
+        <ForecastPage
+          zip={decodeURIComponent(zip)}
+          units={units}
+          onUnits={setUnits}
+          theme={theme}
+          onTheme={setTheme}
+        />
+      )}
       <footer className="site-footer">
         Forecast data by Open-Meteo. Radar tiles by Iowa Environmental Mesonet, NOAA NEXRAD. Alerts by the National
         Weather Service. MapTiler basemap when a key is configured.
@@ -38,11 +56,14 @@ export function App() {
   );
 }
 
-function Landing() {
+function Landing({ theme, onTheme }: { theme: ThemePreference; onTheme: (theme: ThemePreference) => void }) {
   const [zip, setZip] = useState("");
   const [error, setError] = useState("");
   return (
     <main className="landing">
+      <div className="landing-theme">
+        <ThemeToggle theme={theme} onTheme={onTheme} />
+      </div>
       <Wordmark />
       <form
         className="landing-form"
@@ -82,7 +103,19 @@ function Landing() {
   );
 }
 
-function ForecastPage({ zip, units, onUnits }: { zip: string; units: Units; onUnits: (units: Units) => void }) {
+function ForecastPage({
+  zip,
+  units,
+  onUnits,
+  theme,
+  onTheme,
+}: {
+  zip: string;
+  units: Units;
+  onUnits: (units: Units) => void;
+  theme: ThemePreference;
+  onTheme: (theme: ThemePreference) => void;
+}) {
   const [draft, setDraft] = useState(zip);
   const [data, setData] = useState<ForecastData | null>(null);
   const [error, setError] = useState("");
@@ -143,6 +176,7 @@ function ForecastPage({ zip, units, onUnits }: { zip: string; units: Units; onUn
             °C
           </button>
         </div>
+        <ThemeToggle theme={theme} onTheme={onTheme} />
       </header>
       {loading && <p className="status">Loading forecast…</p>}
       {error && !loading && <p className="status error">{error}</p>}
@@ -230,9 +264,9 @@ function ForecastBody({ data, units }: { data: ForecastData; units: Units }) {
               })}
             </div>
             <svg className="hour-chart" viewBox={`0 0 ${chartWidth} 64`} role="img" aria-label="Hourly temperature">
-              <path d={path} fill="none" stroke="#e11d48" strokeWidth="2" />
+              <path d={path} fill="none" stroke="var(--chart)" strokeWidth="2" />
               {points.map((point) => (
-                <circle key={`${point.x}-${point.y}`} cx={point.x} cy={point.y} r="2.5" fill="#e11d48" />
+                <circle key={`${point.x}-${point.y}`} cx={point.x} cy={point.y} r="2.5" fill="var(--chart)" />
               ))}
             </svg>
             <div className="hour-row labels">
@@ -306,6 +340,36 @@ function useUnits(): [Units, (units: Units) => void] {
     window.localStorage.setItem("coldfront-units", units);
   }, [units]);
   return [units, setUnits];
+}
+
+function useTheme(): [ThemePreference, (theme: ThemePreference) => void] {
+  const [theme, setTheme] = useState<ThemePreference>(() => readThemePreference());
+  useEffect(() => {
+    writeThemePreference(theme);
+    applyResolvedTheme(resolveTheme(theme));
+    if (theme !== "system") return undefined;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => applyResolvedTheme(resolveTheme("system"));
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, [theme]);
+  return [theme, setTheme];
+}
+
+function ThemeToggle({ theme, onTheme }: { theme: ThemePreference; onTheme: (theme: ThemePreference) => void }) {
+  return (
+    <div className="segmented" role="group" aria-label="Color theme">
+      <button type="button" className={theme === "light" ? "on" : ""} onClick={() => onTheme("light")}>
+        Light
+      </button>
+      <button type="button" className={theme === "dark" ? "on" : ""} onClick={() => onTheme("dark")}>
+        Dark
+      </button>
+      <button type="button" className={theme === "system" ? "on" : ""} onClick={() => onTheme("system")}>
+        Auto
+      </button>
+    </div>
+  );
 }
 
 function go(path: string) {

@@ -6,7 +6,7 @@ Coldfront shows US weather for a ZIP code. The license is GPL-3.0-only.
 
 The web app shows current conditions, the next 24 hours, a 10-day forecast, live NEXRAD radar, and active National Weather Service alerts. The COSMIC applet shows current conditions, the radar image, and those alerts in a panel popup.
 
-The two apps do not share a binary. They follow the same display rules. [Architecture](docs/architecture.md) is the design record. [Contributing](CONTRIBUTING.md) covers local setup, tests, deploy, and release.
+The two apps do not share a binary. They follow the same display rules. [Architecture](docs/architecture.md) is the design record; [reference](docs/reference.md) holds the field and route tables. [Contributing](CONTRIBUTING.md) covers local setup, tests, deploy, and release.
 
 ## Repository
 

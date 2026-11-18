@@ -2,6 +2,7 @@
 **/*.rs.bk
 
 node_modules/
+.pnpm-store/
 dist/
 .wrangler/
 .dev.vars

@@ -1,0 +1,159 @@
+{
+  "place": {
+    "zip": "55115",
+    "city": "Saint Paul",
+    "state": "Minnesota",
+    "state_abbreviation": "MN",
+    "latitude": 45.071,
+    "longitude": -92.9391
+  },
+  "current": {
+    "time": "2026-11-17T16:45",
+    "temperature_c": 10.7,
+    "apparent_c": 6.7,
+    "humidity": 62,
+    "wind_kmh": 16.9,
+    "weather_code": 1,
+    "label": "Mainly clear",
+    "icon": "mainly-clear"
+  },
+  "hourly_count": 240,
+  "daily_count": 10,
+  "next_hour_time": "2026-11-17T16:00",
+  "next_hour_labels": [
+    "Now",
+    "5p",
+    "6p",
+    "7p",
+    "8p",
+    "9p",
+    "10p",
+    "11p",
+    "12a"
+  ],
+  "day_labels": [
+    "Today",
+    "Wed",
+    "Thu",
+    "Fri",
+    "Sat",
+    "Sun",
+    "Mon",
+    "Tue",
+    "Wed",
+    "Thu"
+  ],
+  "daily0": {
+    "max_c": 12.9,
+    "min_c": 6.0,
+    "pop": 0,
+    "code": 45
+  },
+  "daily4_pop": 64,
+  "display": {
+    "temp_f": 51,
+    "apparent_f": 44,
+    "temp_c": 11,
+    "wind_mph": 11
+  },
+  "rounding": {
+    "input": -1.5,
+    "away_from_zero": -2
+  },
+  "tile": {
+    "zoom": 7,
+    "x": 30,
+    "y": 46,
+    "pixel_x": 244,
+    "pixel_y": 2,
+    "url": "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/7/30/46.png"
+  },
+  "window": {
+    "zoom": 7,
+    "span": 3,
+    "origin_x": 29,
+    "origin_y": 45,
+    "pin_x": 500,
+    "pin_y": 258
+  },
+  "web_frames": 12,
+  "web_first": {
+    "offset_minutes": 55,
+    "layer": "nexrad-n0q-900913-m55m",
+    "label": "55 min ago"
+  },
+  "web_last": {
+    "offset_minutes": 0,
+    "layer": "nexrad-n0q-900913",
+    "label": "Latest scan"
+  },
+  "applet_frames": 6,
+  "applet_first_offset": 50,
+  "codes": [
+    {
+      "code": 0,
+      "label": "Clear",
+      "icon": "clear"
+    },
+    {
+      "code": 2,
+      "label": "Partly cloudy",
+      "icon": "partly-cloudy"
+    },
+    {
+      "code": 3,
+      "label": "Overcast",
+      "icon": "overcast"
+    },
+    {
+      "code": 45,
+      "label": "Fog",
+      "icon": "fog"
+    },
+    {
+      "code": 51,
+      "label": "Drizzle",
+      "icon": "drizzle"
+    },
+    {
+      "code": 61,
+      "label": "Rain",
+      "icon": "rain"
+    },
+    {
+      "code": 71,
+      "label": "Snow",
+      "icon": "snow"
+    },
+    {
+      "code": 80,
+      "label": "Rain showers",
+      "icon": "rain-showers"
+    },
+    {
+      "code": 95,
+      "label": "Thunderstorm",
+      "icon": "thunder"
+    },
+    {
+      "code": 999,
+      "label": "Unknown",
+      "icon": "unknown"
+    }
+  ],
+  "zips": {
+    "valid": [
+      "94110",
+      "55115",
+      "00501"
+    ],
+    "invalid": [
+      "9411",
+      "941100",
+      "abcde",
+      "9411a",
+      "",
+      "94110-1234"
+    ]
+  }
+}

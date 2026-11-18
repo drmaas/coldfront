@@ -26,6 +26,7 @@ Do not add applet UI here. Do not call `coldfront-core` from this package. Keep 
 - Show at most three alerts.
 - Radar stays a 2D canvas. Zoom stays from 5 to 11. The loop stays twelve frames at 750 ms.
 - After a binding change, run `pnpm exec wrangler types --include-runtime false` and commit `worker-configuration.d.ts`.
+- Keep `pnpm-workspace.yaml` `allowBuilds` for `esbuild` and `workerd`. pnpm 12 blocks those install scripts otherwise.
 
 ## Commands
 

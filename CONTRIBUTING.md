@@ -2,7 +2,7 @@
 
 This file is how to run Coldfront locally, how to test it, and how to deploy or release it.
 
-Design rules live in [docs/architecture.md](docs/architecture.md). Agent rules live in [AGENTS.md](AGENTS.md).
+Design rules live in [docs/architecture.md](docs/architecture.md). Field lists and Worker routes live in [docs/reference.md](docs/reference.md). Agent rules live in [AGENTS.md](AGENTS.md).
 
 ## Prerequisites
 

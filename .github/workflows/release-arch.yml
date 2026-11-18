@@ -19,7 +19,7 @@ jobs:
             pkgconf wayland libxkbcommon fontconfig freetype2 expat \
             vulkan-headers mesa libinput dbus
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -40,14 +40,14 @@ jobs:
           ls -l dist/
 
       - name: Upload the package as a build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cosmic-coldfront-arch
           path: dist/*.pkg.tar.zst
           if-no-files-found: error
 
       - name: Publish the GitHub Release
-        if: github.ref_type == "tag"
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

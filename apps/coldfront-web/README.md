@@ -24,17 +24,17 @@ From this directory:
 
 ```bash
 cp .dev.vars.example .dev.vars
-npm ci
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
 The dev server is `http://localhost:5173`. An empty `MAPTILER_API_KEY` means radar without streets. Do not commit `.dev.vars`.
 
 ```bash
-npm test
-npm run lint
-npm run typecheck
-npm run build
+pnpm test
+pnpm run lint
+pnpm run typecheck
+pnpm run build
 ```
 
-`npm test` runs Vitest on `lib/**/*.test.ts`. It does not start the Worker.
+`pnpm test` runs Vitest on `lib/**/*.test.ts`. It does not start the Worker.

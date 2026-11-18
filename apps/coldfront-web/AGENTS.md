@@ -25,18 +25,18 @@ Do not add applet UI here. Do not call `coldfront-core` from this package. Keep 
 - Unit changes read `localStorage` key `coldfront-units`. Do not refetch on °F / °C.
 - Show at most three alerts.
 - Radar stays a 2D canvas. Zoom stays from 5 to 11. The loop stays twelve frames at 750 ms.
-- After a binding change, run `npx wrangler types --include-runtime false` and commit `worker-configuration.d.ts`.
+- After a binding change, run `pnpm exec wrangler types --include-runtime false` and commit `worker-configuration.d.ts`.
 
 ## Commands
 
 From this directory:
 
 ```bash
-npm test
-npm run lint
-npm run typecheck
-npm run build
-npx wrangler types --include-runtime false --check
+pnpm test
+pnpm run lint
+pnpm run typecheck
+pnpm run build
+pnpm exec wrangler types --include-runtime false --check
 ```
 
 From the repository root, `just check` includes those steps.

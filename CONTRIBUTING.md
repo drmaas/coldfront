@@ -9,7 +9,7 @@ Design rules live in [docs/architecture.md](docs/architecture.md). Agent rules l
 Install these tools before the first run:
 
 - Rust stable, with rustfmt and clippy. `rust-toolchain.toml` selects that toolchain. Do not use a compiler older than 1.93. Current libcosmic rejects it.
-- Node.js 22 and npm. CI uses Node 22.
+- Node.js 26 (current LTS) and pnpm 12. `.nvmrc` and `packageManager` in `apps/coldfront-web` pin those. CI installs them with `pnpm/setup`.
 - [`just`](https://github.com/casey/just). The root `justfile` is the entry point.
 
 The applet also needs the system libraries from the `rust` job in `.github/workflows/ci.yml`. On Debian and Ubuntu that set includes Wayland, libxkbcommon, OpenSSL, fontconfig, FreeType, expat, Vulkan, libinput, gbm, udev, dbus, EGL, and GL.
@@ -20,8 +20,8 @@ Run these commands from `apps/coldfront-web`:
 
 ```bash
 cp .dev.vars.example .dev.vars
-npm ci
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
 Open `http://localhost:5173`. Leave `MAPTILER_API_KEY` empty to show radar without streets. `.dev.vars` is gitignored. Do not commit it.
@@ -29,19 +29,19 @@ Open `http://localhost:5173`. Leave `MAPTILER_API_KEY` empty to show radar witho
 Other scripts in that package:
 
 ```bash
-npm test
-npm run lint
-npm run typecheck
-npm run build
-npm run preview
+pnpm test
+pnpm run lint
+pnpm run typecheck
+pnpm run build
+pnpm run preview
 ```
 
-`npm test` runs Vitest on `lib/**/*.test.ts` only. It does not boot the Worker.
+`pnpm test` runs Vitest on `lib/**/*.test.ts` only. It does not boot the Worker.
 
 After a Worker binding change, regenerate the checked-in types and commit the diff:
 
 ```bash
-npx wrangler types --include-runtime false
+pnpm exec wrangler types --include-runtime false
 ```
 
 CI checks that file with `--check`. A stale `worker-configuration.d.ts` fails the web job.
@@ -78,19 +78,19 @@ When a shared rule changes, update the fixture and both tests in one change. `ju
 
 CI on pull requests and on `main` runs three jobs:
 
-- Web: `npm ci`, Worker types `--check`, lint, typecheck, test, build.
-- Rust: fmt, clippy `-D warnings`, `cargo test --workspace --locked`, `cargo build -p cosmic-coldfront --locked`.
+- Web: `pnpm install --frozen-lockfile`, Worker types `--check`, lint, typecheck, test, build.
+- Rust: fmt, clippy `-D warnings`, `cargo test --workspace --locked`. Clippy and tests already compile the applet, so CI does not run a separate `cargo build`.
 - Secret scan: gitleaks.
 
 CI does not deploy the site. CI does not build the Arch package.
 
 ## Deploy the web app
 
-Deploy is manual. From `apps/coldfront-web`, after `npx wrangler login`:
+Deploy is manual. From `apps/coldfront-web`, after `pnpm exec wrangler login`:
 
 ```bash
-npx wrangler secret put MAPTILER_API_KEY
-npm run build && npx wrangler deploy
+pnpm exec wrangler secret put MAPTILER_API_KEY
+pnpm run build && pnpm exec wrangler deploy
 ```
 
 Skip the secret when the site should serve radar without a street map. The key is not in `wrangler.jsonc`. A missing secret must not fail the deploy.

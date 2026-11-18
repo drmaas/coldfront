@@ -60,7 +60,7 @@ just test
 just check
 ```
 
-`just test` runs `cargo test --workspace --locked` and `npm test`. `just check` also runs fmt, clippy `-D warnings`, the applet build, Worker type check, web lint, typecheck, and web build.
+`just test` runs `cargo test --workspace --locked` and `pnpm test`. `just check` also runs fmt, clippy `-D warnings`, the applet build, Worker type check, web lint, typecheck, and web build.
 
 ## Failure behavior
 

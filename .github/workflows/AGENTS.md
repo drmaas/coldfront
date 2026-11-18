@@ -14,8 +14,8 @@ Do not put product behavior here. Do not deploy the web app from Actions.
 
 `ci.yml` runs on pull requests, pushes to `main`, and `workflow_dispatch`. It has three jobs. None of them publish.
 
-- `web` uses Node 22 in `apps/coldfront-web`. Order is `npm ci`, `npx wrangler types --include-runtime false --check`, lint, typecheck, test, build.
-- `rust` installs the COSMIC build libraries, then runs fmt, `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`, and `cargo build -p cosmic-coldfront --locked`.
+- `web` uses `pnpm/setup@v3` in `apps/coldfront-web` with Node LTS, store cache, and a frozen lockfile. Order is install, `pnpm exec wrangler types --include-runtime false --check`, lint, typecheck, test, build.
+- `rust` installs the COSMIC build libraries, then runs fmt, `cargo clippy --all-targets --locked -- -D warnings`, and `cargo test --workspace --locked`. Do not add a separate applet `cargo build` after those steps; clippy and tests already compile the workspace.
 - `secrets` runs gitleaks `v8.30.1` with `--redact`. Checkout uses `fetch-depth: 0`.
 
 `release-arch.yml` runs only on a push of a `v*` tag. It needs `permissions: contents: write`. The job uses the `archlinux:latest` container.
@@ -25,7 +25,7 @@ Do not put product behavior here. Do not deploy the web app from Actions.
 - Keep CI and release in separate files. Do not build the Arch package on pull requests.
 - Do not add a Worker deploy job. Deploy stays manual.
 - Keep `ci.yml` free of `contents: write` and of repository secrets.
-- Node stays on 22. Rust stays on `dtolnay/rust-toolchain@stable` with rustfmt and clippy.
+- Web stays on pnpm and Node LTS (`pnpm/setup` with `runtime: node@lts`). Rust stays on `dtolnay/rust-toolchain@stable` with rustfmt and clippy.
 - Cargo invocations in CI stay `--locked`. The PKGBUILD stays `--frozen`.
 - Keep the Ubuntu apt mirror rewrite in the `rust` job. The Azure Ubuntu mirror has failed DNS in this workflow. The install step timeout stays 3 minutes.
 - Do not drop a library from the `rust` job or the Arch `pacman` line unless the applet builds without it.
@@ -36,7 +36,7 @@ Do not put product behavior here. Do not deploy the web app from Actions.
 - Upload `dist/*.pkg.tar.zst` with `if-no-files-found: error`.
 - If the GitHub Release already exists, `gh release upload --clobber`. Otherwise `gh release create` with `--generate-notes`.
 - Do not push a `v*` tag to test this workflow. It publishes a release.
-- Pin action major versions already in these files (`checkout@v4`, `setup-node@v4`, `upload-artifact@v4`, `Swatinem/rust-cache@v2`). A gitleaks bump changes the download URL and this file together.
+- Pin action major versions already in these files (`checkout@v7`, `pnpm/setup@v3`, `upload-artifact@v7`, `Swatinem/rust-cache@v2`). A gitleaks bump changes the download URL and this file together.
 
 ## Failures
 
@@ -48,4 +48,4 @@ Do not put product behavior here. Do not deploy the web app from Actions.
 
 Good: add a CI step that still uses `--locked` and keeps clippy `-D warnings`.
 
-Bad: trigger `release-arch.yml` from `pull_request`, or run `npx wrangler deploy` in `ci.yml`.
+Bad: trigger `release-arch.yml` from `pull_request`, or run `pnpm exec wrangler deploy` in `ci.yml`.

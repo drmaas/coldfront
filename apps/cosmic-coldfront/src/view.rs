@@ -16,37 +16,56 @@ use crate::app::{AppModel, Message, PopupTab};
 use crate::fl;
 
 pub fn panel(app: &AppModel) -> Element<'_, Message> {
-    let icon_size = app.core.applet.suggested_size(true).0;
-    let (major, minor) = app.core.applet.suggested_padding(true);
-    let (horizontal, vertical) = if app.core.applet.is_horizontal() {
-        (major, minor)
-    } else {
-        (minor, major)
-    };
-    let mut content = widget::Row::new().spacing(4).align_y(Alignment::Center);
+    let spacing = cosmic::theme::spacing();
+    // Cosmic symbolic SVGs sit flush to the viewBox; inset so AppletIcon
+    // focus/hover chrome does not clip the glyph.
+    let icon_size = app
+        .core
+        .applet
+        .suggested_size(true)
+        .0
+        .saturating_sub(2)
+        .max(12);
+
+    let mut children: Vec<Element<'_, Message>> = Vec::new();
     if !app.alerts.is_empty() {
-        content = content.push(
+        children.push(
             widget::icon::from_name("dialog-warning-symbolic")
                 .symbolic(true)
-                .size(icon_size),
+                .size(icon_size)
+                .into(),
         );
     }
-    content = content.push(
+    children.push(
         widget::icon::from_name(app.panel_icon())
             .symbolic(true)
-            .size(icon_size),
+            .size(icon_size)
+            .into(),
     );
     if let Some(temp) = app.panel_temperature() {
-        content = content.push(widget::text(temp));
+        children.push(app.core.applet.text(temp).into());
     }
-    let button = widget::button::custom(content)
-        .padding([vertical as f32, horizontal as f32])
-        .on_press(Message::TogglePopup)
-        .class(cosmic::theme::Button::AppletIcon);
+
+    let readout: Element<'_, Message> = if app.core.applet.is_horizontal() {
+        widget::Row::with_children(children)
+            .align_y(Alignment::Center)
+            .spacing(spacing.space_xxs)
+            .into()
+    } else {
+        widget::Column::with_children(children)
+            .align_x(Alignment::Center)
+            .spacing(spacing.space_xxs)
+            .into()
+    };
+
+    let button = widget::button::custom(readout)
+        .class(cosmic::theme::Button::AppletIcon)
+        .on_press(Message::TogglePopup);
+    let sized = widget::autosize::autosize(button, widget::Id::unique());
     app.core
         .applet
         .applet_tooltip(
-            button,
+            sized,
             app.tooltip(),
             app.popup.is_some(),
             Message::Surface,
@@ -72,6 +91,7 @@ pub fn popup(app: &AppModel) -> Element<'_, Message> {
         PopupTab::Radar => radar_tab(app),
         PopupTab::Hourly => hourly_tab(app),
         PopupTab::Forecast => forecast_tab(app),
+        PopupTab::Alerts => alerts_tab(app),
         PopupTab::Settings => settings_tab(app),
     });
 
@@ -126,7 +146,7 @@ fn header(app: &AppModel) -> Element<'_, Message> {
         } else {
             "dialog-warning-symbolic"
         }))
-        .on_press(Message::SelectTab(PopupTab::Current))
+        .on_press(Message::SelectTab(PopupTab::Alerts))
         .padding(spacing.space_xs),
         widget::text::body(fl!("tooltip-alerts")),
         widget::tooltip::Position::Bottom,
@@ -261,18 +281,48 @@ fn current_tab(app: &AppModel) -> Element<'_, Message> {
         )));
     }
 
-    if !app.alerts.is_empty() {
-        col = col.push(widget::divider::horizontal::default());
-        col = col.push(widget::text::title4(fl!("alerts")));
-        for alert in app.alerts.iter().take(3) {
-            col = col.push(widget::text::body(alert.event.clone()));
-            if !alert.headline.is_empty() {
-                col = col.push(widget::text::caption(alert.headline.clone()));
-            }
-        }
+    col.into()
+}
+
+fn alerts_tab(app: &AppModel) -> Element<'_, Message> {
+    let spacing = cosmic::theme::spacing();
+    if app.alerts.is_empty() {
+        return widget::container(
+            widget::Column::new()
+                .spacing(spacing.space_xs)
+                .align_x(Alignment::Center)
+                .push(
+                    widget::icon::from_name("weather-clear-symbolic")
+                        .size(48)
+                        .symbolic(true),
+                )
+                .push(widget::text::title4(fl!("no-active-alerts")))
+                .push(widget::text::caption(fl!("area-clear"))),
+        )
+        .align_x(Alignment::Center)
+        .width(Length::Fill)
+        .into();
     }
 
-    col.into()
+    let mut list = widget::list_column();
+    for alert in app.alerts.iter().take(3) {
+        let mut item = widget::Column::new().spacing(spacing.space_xxxs).push(
+            widget::Row::new()
+                .spacing(spacing.space_xxs)
+                .align_y(Alignment::Center)
+                .push(
+                    widget::icon::from_name("dialog-warning-symbolic")
+                        .size(16)
+                        .symbolic(true),
+                )
+                .push(widget::text::body(alert.event.clone())),
+        );
+        if !alert.headline.is_empty() {
+            item = item.push(widget::text::caption(alert.headline.clone()));
+        }
+        list = list.add(item);
+    }
+    list.into()
 }
 
 fn radar_tab(app: &AppModel) -> Element<'_, Message> {

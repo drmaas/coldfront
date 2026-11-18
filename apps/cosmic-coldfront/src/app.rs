@@ -41,6 +41,7 @@ pub enum PopupTab {
     Radar,
     Hourly,
     Forecast,
+    Alerts,
     Settings,
 }
 
@@ -505,7 +506,7 @@ impl AppModel {
     fn select_tab(&mut self, tab: PopupTab) -> Task<cosmic::Action<Message>> {
         let previous = self.active_tab;
         self.active_tab = tab;
-        self.tab_model = if tab == PopupTab::Settings {
+        self.tab_model = if matches!(tab, PopupTab::Settings | PopupTab::Alerts) {
             build_tab_model_none()
         } else {
             build_tab_model(tab)

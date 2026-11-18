@@ -32,7 +32,7 @@ Do not treat the web app and the applet as one program. They do not share a bina
 - Do not commit `MAPTILER_API_KEY`. Do not put it in `wrangler.jsonc`, source, or a tracked env file.
 - Do not fetch OpenStreetMap tiles unless the applet user turns that setting on. Do not use OSM as the web basemap.
 - Show at most three alerts. A failed alert request must not hide a forecast that already loaded. See [Failures](docs/architecture.md#failures) for the current split.
-- The applet popup tabs are Current, Radar, Hourly, and 10-day, with Settings from the header gear. Radar uses the interactive viewport, not a stacked image above the facts.
+- The applet popup tabs are Current, Radar, Hourly, and 10-day, with Settings and Alerts from the header. Radar uses the interactive viewport, not a stacked image above the facts.
 - Do not create a `v*` tag to try the release workflow. CI does not deploy the site.
 - New Rust source keeps `SPDX-License-Identifier: GPL-3.0-only`. Crates stay `publish = false`.
 - Do not lower `rust-version` below 1.93. libcosmic requires it. CI uses the stable toolchain in `rust-toolchain.toml`.

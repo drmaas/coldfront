@@ -14,7 +14,7 @@ Do not call the web Worker from the applet.
 
 ## Rules
 
-- Popup tabs are Current, Radar, Hourly, and 10-day, plus Settings from the header gear. Radar is a tab, not stacked above the facts.
+- Popup tabs are Current, Radar, Hourly, and 10-day. Settings and Alerts open from the header gear and alert button (not tab-bar segments). Radar is a tab, not stacked above the facts.
 - `init` must not fetch. After startup, a valid saved ZIP loads place, forecast, and alerts so the panel icon matches. Radar tiles load only when the Radar tab is open (or was opened and needs a reload).
 - Call `HttpClient` for ZIP, forecast, and alerts. Call `mapload` for tiles. Call `compose_viewport` for the interactive Radar tab.
 - Load the latest radar frame (offset 0) before older frames. Offsets stay 50, 40, 30, 20, 10, 0. Interactive zoom is 5–11. Playback is 800 ms while the popup is open on the Radar tab with at least two frames.

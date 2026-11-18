@@ -45,7 +45,7 @@ jobs:
         run: pnpm run build
 
   rust:
-    name: Rust format, lint, test, and applet build
+    name: Rust format, lint, and test
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
@@ -97,9 +97,6 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --locked
-
-      - name: Build the applet
-        run: cargo build -p cosmic-coldfront --locked
 
   secrets:
     name: Secret scan

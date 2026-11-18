@@ -23,7 +23,7 @@ Do not treat the web app and the applet as one program. They do not share a bina
 
 - Keep shared display rules in `crates/coldfront-core` and `apps/coldfront-web/lib/domain.ts`. Do not put those rules only in a React component or an iced view.
 - When you change ZIP checks, parsers, rounding, labels, tile math, IEM URLs, or radar frame lists, change Rust, TypeScript, and `fixtures/contract.json` in the same change. Both contract tests must pass.
-- Leave web-only chart helpers (`chartPoints`, `rangePlacement`) in TypeScript. Leave applet compositing (`compose_radar_map`) and `symbolic_icon` in Rust.
+- Leave web-only chart helpers (`chartPoints`, `rangePlacement`) in TypeScript. Leave applet compositing (`compose_radar_map`, `compose_viewport`) and `symbolic_icon` in Rust.
 - Request Open-Meteo in Celsius and km/h with `forecast_days=10`. Convert only at display time.
 - Round display values half away from zero. `-1.5` becomes `-2`. Non-finite input becomes `0`.
 - A US ZIP code is five ASCII digits. Leading zeros count. Reject ZIP+4.
@@ -32,7 +32,7 @@ Do not treat the web app and the applet as one program. They do not share a bina
 - Do not commit `MAPTILER_API_KEY`. Do not put it in `wrangler.jsonc`, source, or a tracked env file.
 - Do not fetch OpenStreetMap tiles unless the applet user turns that setting on. Do not use OSM as the web basemap.
 - Show at most three alerts. A failed alert request must not hide a forecast that already loaded. See [Failures](docs/architecture.md#failures) for the current split.
-- The applet popup order is summary, radar, current facts, alerts, settings. Do not hide the radar behind a tab.
+- The applet popup tabs are Current, Radar, Hourly, and 10-day, with Settings from the header gear. Radar uses the interactive viewport, not a stacked image above the facts.
 - Do not create a `v*` tag to try the release workflow. CI does not deploy the site.
 - New Rust source keeps `SPDX-License-Identifier: GPL-3.0-only`. Crates stay `publish = false`.
 - Do not lower `rust-version` below 1.93. libcosmic requires it. CI uses the stable toolchain in `rust-toolchain.toml`.
@@ -45,6 +45,7 @@ Do not treat the web app and the applet as one program. They do not share a bina
 | Worker routes, cache, upstream URLs | `apps/coldfront-web/lib/server/proxy.ts` and `worker/index.ts` |
 | Web page behavior | `apps/coldfront-web/src` |
 | Applet popup behavior | `apps/cosmic-coldfront/src/app.rs` |
+| Applet popup tabs and layout | `apps/cosmic-coldfront/src/view.rs` |
 | Applet tile fetch and composite | `apps/cosmic-coldfront/src/mapload.rs` calling `coldfront-core` |
 | Saved ZIP, units, key, OSM toggle | `apps/cosmic-coldfront/src/config.rs` |
 | Applet strings | `apps/cosmic-coldfront/i18n/en/cosmic_coldfront.ftl` |

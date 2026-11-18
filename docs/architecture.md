@@ -51,13 +51,13 @@ flowchart LR
 | `apps/cosmic-coldfront` | COSMIC panel applet. Links `coldfront-core`, talks to upstream hosts itself. No map widget, so it composites raster tiles into one image. |
 | `crates/coldfront-core` | Rust domain crate. Web does not call it. `lib/domain.ts` is the parallel copy. |
 
-Web page: current conditions, next 24 hours, 10-day list, radar, up to three alerts. Applet popup: one-line summary, radar image, current facts, up to three alerts, settings. Applet parses the full 10-day forecast but does not draw the hourly chart or daily list.
+Web page: current conditions, next 24 hours, 10-day list, radar, up to three alerts. Applet popup: tabbed Current, Radar, Hourly, and 10-day views, with Settings from the header gear. Up to three alerts show on Current.
 
 ## Shared rules
 
 Change a shared rule in Rust, TypeScript, and `fixtures/contract.json` in one change. Both contract tests load the same fixtures. See [Contract lock](reference.md#contract-lock) for the full rule table.
 
-Stay in TypeScript: `chartPoints`, `rangePlacement`. Stay in Rust: `compose_radar_map`, `HttpClient`, `symbolic_icon`.
+Stay in TypeScript: `chartPoints`, `rangePlacement`. Stay in Rust: `compose_radar_map`, `compose_viewport`, `HttpClient`, `symbolic_icon`.
 
 ## Data flow
 
@@ -93,21 +93,22 @@ sequenceDiagram
   participant M as mapload
   participant Up as Upstream hosts
 
-  UI->>UI: start_load (bump generation)
+  UI->>UI: start weather load (bump generation)
   UI->>H: lookup_zip → forecast → alerts
   H->>Up: Zippopotam, Open-Meteo, NWS
   Up-->>H: JSON
   H-->>UI: WeatherReady (or fail)
 
-  UI->>M: tile_window zoom 7, 3×3
+  Note over UI: Radar tab open
+  UI->>M: map_viewport zoom 5–11
   M->>Up: basemap tiles + radar offset 0
   Up-->>M: PNGs
-  M-->>UI: first composite
+  M-->>UI: MapReady first composite
 
   loop Older frames
     M->>Up: radar offsets 50…10
     Up-->>M: PNGs
-    M-->>UI: OlderFrame (skip stale generation)
+    M-->>UI: OlderFrame (skip stale map_generation)
   end
 ```
 
@@ -121,15 +122,15 @@ Worker details, cache headers, and validation: [Worker API](reference.md#worker-
 
 ### Applet path (short)
 
-App id `io.github.drmaas.CosmicColdfront`. `init` reads cosmic-config and does not fetch. Panel shows default icon until a load succeeds. Closing the popup keeps memory; reopening does not fetch when `forecast` and `frames` are set.
+App id `io.github.drmaas.CosmicColdfront`. `init` reads cosmic-config and does not fetch. After startup, a valid saved ZIP loads place, forecast, and alerts so the panel icon and temperature match. Closing the popup keeps memory; reopening does not refetch weather when `forecast` is set. Radar tiles load when the Radar tab opens.
 
-Popup order is fixed: summary, radar, current facts, alerts, settings. Invalid ZIP bumps `generation`, clears frames, and returns with no network. Alert HTTP failure becomes an empty list; ZIP and forecast errors fail the load. Stale `generation` results are ignored.
+Popup tabs are Current, Radar, Hourly, and 10-day. Settings opens from the header gear. Current, Hourly, 10-day, and Settings use a 480px-wide popup. Radar resizes that popup to about 960×700. Invalid ZIP bumps `generation`, clears the map, and returns with no network. Alert HTTP failure becomes an empty list. A failed weather refresh keeps the last forecast. Stale `generation` / `map_generation` results are ignored.
 
-Config version 1: `zip`, `fahrenheit` (default true), `maptiler_api_key`, `allow_osm_basemap` (default false). Unit changes save without reload. ZIP, key, and OSM toggle reload when the popup is open.
+Config version 1: `zip`, `fahrenheit` (default true), `maptiler_api_key`, `allow_osm_basemap` (default false). Unit changes save without reload. ZIP changes refetch weather. Key and OSM toggle reload the map after the Radar tab has been opened.
 
 ## Radar and basemap
 
-Both clients draw IEM NEXRAD tiles. Web uses a 2D canvas (zoom 5–11, twelve frames at 750 ms). Applet composites offline into a 400×260 raster (offsets 50…0, 800 ms loop while popup open). Frame lists and layer names: [Radar](reference.md#radar).
+Both clients draw IEM NEXRAD tiles. Web uses a 2D canvas (zoom 5–11, twelve frames at 750 ms). Applet Radar tab composites into an 880×520 viewport (zoom 5–11, pan/zoom gestures, offsets 50…0, 800 ms loop while the Radar tab is open). `compose_radar_map` (400×260) remains for contract tests. Frame lists and layer names: [Radar](reference.md#radar).
 
 ```mermaid
 flowchart TD

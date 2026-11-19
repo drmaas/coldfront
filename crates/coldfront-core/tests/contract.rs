@@ -6,9 +6,10 @@ use std::fs;
 use std::path::PathBuf;
 
 use coldfront_core::{
-    applet_radar_frames, day_label, describe, display_temperature, display_wind_mph, format_as_of,
-    hour_label, iem_tile_url, is_us_zip, lat_lon_to_tile, next_hours, parse_alerts,
-    parse_open_meteo, parse_zippopotam, round_half_away_from_zero, tile_window, web_radar_frames,
+    applet_radar_frames, chart_points, day_label, describe, display_icon, display_temperature,
+    display_wind_mph, format_as_of, hour_label, iem_tile_url, is_us_zip, lat_lon_to_tile,
+    next_hours, parse_alerts, parse_open_meteo, parse_zippopotam, range_placement,
+    round_half_away_from_zero, tile_window, web_radar_frames,
 };
 use serde_json::Value;
 
@@ -93,10 +94,33 @@ fn place_forecast_and_labels_match_the_contract() {
     let info = describe(forecast.current.weather_code);
     assert_eq!(info.label, current["label"].as_str().unwrap());
     assert_eq!(info.icon, current["icon"].as_str().unwrap());
+    assert_eq!(
+        forecast.current.is_day,
+        current["is_day"].as_bool().unwrap()
+    );
+    let icons = &contract["display_icons"];
+    assert_eq!(
+        display_icon("mainly-clear", true),
+        icons["mainly_clear_day"].as_str().unwrap()
+    );
+    assert_eq!(
+        display_icon("clear", false),
+        icons["clear_night"].as_str().unwrap()
+    );
+    assert_eq!(
+        display_icon("partly-cloudy", false),
+        icons["partly_cloudy_night"].as_str().unwrap()
+    );
+    assert_eq!(
+        display_icon("rain", false),
+        icons["rain_night"].as_str().unwrap()
+    );
 
     let hours = next_hours(&forecast, 24);
     assert_eq!(hours.len(), 24);
     assert_eq!(hours[0].time, contract["next_hour_time"].as_str().unwrap());
+    assert!(hours[0].is_day);
+    assert!(!hours[1].is_day);
     let labels: Vec<String> = hours
         .iter()
         .take(9)
@@ -169,6 +193,44 @@ fn place_forecast_and_labels_match_the_contract() {
         round_half_away_from_zero(rounding["input"].as_f64().unwrap()),
         rounding["away_from_zero"].as_i64().unwrap() as i32
     );
+
+    let chart = &contract["chart"];
+    let values: Vec<f64> = chart["values"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_f64().unwrap())
+        .collect();
+    let points = chart_points(
+        &values,
+        chart["column_width"].as_f64().unwrap(),
+        chart["height"].as_f64().unwrap(),
+        chart["pad"].as_f64().unwrap(),
+    );
+    let expected_points = chart["points"].as_array().unwrap();
+    assert_eq!(points.len(), expected_points.len());
+    for (point, expected) in points.iter().zip(expected_points) {
+        close(point.x, expected["x"].as_f64().unwrap());
+        close(point.y, expected["y"].as_f64().unwrap());
+    }
+    let range = &chart["range"];
+    let bar = range_placement(
+        range["low"].as_f64().unwrap(),
+        range["high"].as_f64().unwrap(),
+        range["scale_min"].as_f64().unwrap(),
+        range["scale_max"].as_f64().unwrap(),
+    );
+    close(bar.left, range["left"].as_f64().unwrap());
+    close(bar.width, range["width"].as_f64().unwrap());
+    let equal = &chart["equal_range"];
+    let equal_bar = range_placement(
+        equal["low"].as_f64().unwrap(),
+        equal["high"].as_f64().unwrap(),
+        equal["scale_min"].as_f64().unwrap(),
+        equal["scale_max"].as_f64().unwrap(),
+    );
+    close(equal_bar.left, equal["left"].as_f64().unwrap());
+    close(equal_bar.width, equal["width"].as_f64().unwrap());
 }
 
 #[test]

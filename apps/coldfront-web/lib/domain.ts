@@ -16,6 +16,8 @@ export interface Current {
   humidity: number;
   windKmh: number;
   weatherCode: number;
+  /** Open-Meteo day/night flag for the place timezone. */
+  isDay: boolean;
 }
 
 export interface Hour {
@@ -23,6 +25,7 @@ export interface Hour {
   temperatureC: number;
   weatherCode: number;
   precipProbability: number;
+  isDay: boolean;
 }
 
 export interface Day {
@@ -129,6 +132,36 @@ export function describe(code: number): WeatherInfo {
   return { label: "Unknown", icon: "unknown" };
 }
 
+/** Day or night display icon id from a `describe` icon and Open-Meteo `is_day`. */
+export function displayIcon(icon: string, isDay: boolean): string {
+  if (!isDay) {
+    if (icon === "clear") return "clear-night";
+    if (icon === "mainly-clear") return "mainly-clear-night";
+    if (icon === "partly-cloudy") return "partly-cloudy-night";
+  }
+  switch (icon) {
+    case "clear":
+    case "mainly-clear":
+    case "partly-cloudy":
+    case "overcast":
+    case "fog":
+    case "drizzle":
+    case "freezing-drizzle":
+    case "rain":
+    case "freezing-rain":
+    case "snow":
+    case "rain-showers":
+    case "snow-showers":
+    case "thunder":
+    case "clear-night":
+    case "mainly-clear-night":
+    case "partly-cloudy-night":
+      return icon;
+    default:
+      return "unknown";
+  }
+}
+
 export function parseZippopotam(body: unknown): Place {
   const value = record(body, "zip response");
   const places = value.places;
@@ -155,10 +188,12 @@ export function parseOpenMeteo(body: unknown): Forecast {
   const hourTemps = numberArray(hourly, "temperature_2m");
   const hourCodes = numberArray(hourly, "weather_code");
   const hourPops = numberArray(hourly, "precipitation_probability");
+  const hourIsDay = numberArray(hourly, "is_day");
   if (
     hourTimes.length !== hourTemps.length ||
     hourTimes.length !== hourCodes.length ||
-    hourTimes.length !== hourPops.length
+    hourTimes.length !== hourPops.length ||
+    hourTimes.length !== hourIsDay.length
   ) {
     throw new Error("hourly length mismatch");
   }
@@ -186,12 +221,14 @@ export function parseOpenMeteo(body: unknown): Forecast {
       humidity: roundHalfAwayFromZero(requiredNumber(current, "relative_humidity_2m")),
       windKmh: requiredNumber(current, "wind_speed_10m"),
       weatherCode: roundHalfAwayFromZero(requiredNumber(current, "weather_code")),
+      isDay: requiredNumber(current, "is_day") !== 0,
     },
     hourly: hourTimes.map((time, index) => ({
       time,
       temperatureC: hourTemps[index],
       weatherCode: roundHalfAwayFromZero(hourCodes[index]),
       precipProbability: roundHalfAwayFromZero(hourPops[index]),
+      isDay: hourIsDay[index] !== 0,
     })),
     daily: dayTimes.map((date, index) => ({
       date,

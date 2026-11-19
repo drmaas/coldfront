@@ -378,6 +378,31 @@ fn blit_tiles(image: &mut RgbaImage, grid: &TileWindow, tiles: &[Option<Vec<u8>>
 }
 
 fn decode_tile(bytes: &[u8]) -> Option<RgbaImage> {
+    use std::collections::HashMap;
+    use std::hash::{Hash, Hasher};
+    use std::sync::Mutex;
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    let key = hasher.finish();
+
+    static CACHE: Mutex<Option<HashMap<u64, RgbaImage>>> = Mutex::new(None);
+    if let Ok(mut guard) = CACHE.lock() {
+        let cache = guard.get_or_insert_with(HashMap::new);
+        if let Some(image) = cache.get(&key) {
+            return Some(image.clone());
+        }
+        let image = decode_tile_uncached(bytes)?;
+        if cache.len() > 96 {
+            cache.clear();
+        }
+        cache.insert(key, image.clone());
+        return Some(image);
+    }
+    decode_tile_uncached(bytes)
+}
+
+fn decode_tile_uncached(bytes: &[u8]) -> Option<RgbaImage> {
     let image = image::load_from_memory(bytes).ok()?.to_rgba8();
     if image.width() == TILE_SIZE && image.height() == TILE_SIZE {
         Some(image)

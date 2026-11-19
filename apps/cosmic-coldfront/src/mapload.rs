@@ -14,8 +14,9 @@ use coldfront_core::{
     osm_tile_url,
 };
 
-pub const MAP_VIEW_WIDTH: u32 = 800;
-pub const MAP_VIEW_HEIGHT: u32 = 480;
+/// Compact Radar tab image. Narrower than the popup so zoom controls sit on the map.
+pub const MAP_VIEW_WIDTH: u32 = 400;
+pub const MAP_VIEW_HEIGHT: u32 = 220;
 const TILE_MARGIN: u32 = 1;
 
 #[derive(Clone)]
@@ -124,6 +125,8 @@ pub fn viewport_for(
     zoom: u32,
     pan_x: f64,
     pan_y: f64,
+    view_width: u32,
+    view_height: u32,
 ) -> MapViewport {
     map_viewport(MapCamera {
         latitude,
@@ -131,8 +134,8 @@ pub fn viewport_for(
         zoom,
         pan_x,
         pan_y,
-        view_width: MAP_VIEW_WIDTH,
-        view_height: MAP_VIEW_HEIGHT,
+        view_width: view_width.max(1),
+        view_height: view_height.max(1),
         margin: TILE_MARGIN,
     })
 }
@@ -144,6 +147,8 @@ pub struct MapRequest {
     pub zoom: u32,
     pub pan_x: f64,
     pub pan_y: f64,
+    pub view_width: u32,
+    pub view_height: u32,
     pub offset_minutes: u32,
 }
 
@@ -175,6 +180,8 @@ pub async fn ensure_map_frames(
         request.zoom,
         request.pan_x,
         request.pan_y,
+        request.view_width,
+        request.view_height,
     );
     let frames = applet_radar_frames();
     let primary = frames

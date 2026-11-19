@@ -15,7 +15,14 @@
     "wind_kmh": 16.9,
     "weather_code": 1,
     "label": "Mainly clear",
-    "icon": "mainly-clear"
+    "icon": "mainly-clear",
+    "is_day": true
+  },
+  "display_icons": {
+    "mainly_clear_day": "mainly-clear",
+    "clear_night": "clear-night",
+    "partly_cloudy_night": "partly-cloudy-night",
+    "rain_night": "rain"
   },
   "hourly_count": 240,
   "daily_count": 10,
@@ -59,6 +66,21 @@
   "rounding": {
     "input": -1.5,
     "away_from_zero": -2
+  },
+  "chart": {
+    "values": [51, 50, 48, 47, 46],
+    "column_width": 64,
+    "height": 64,
+    "pad": 8,
+    "points": [
+      { "x": 32, "y": 8 },
+      { "x": 96, "y": 17.6 },
+      { "x": 160, "y": 36.8 },
+      { "x": 224, "y": 46.4 },
+      { "x": 288, "y": 56 }
+    ],
+    "range": { "low": 47, "high": 51, "scale_min": 46, "scale_max": 51, "left": 20, "width": 80 },
+    "equal_range": { "low": 50, "high": 50, "scale_min": 46, "scale_max": 51, "left": 80, "width": 2 }
   },
   "tile": {
     "zoom": 7,

@@ -16,11 +16,12 @@ Change a shared rule in Rust, in TypeScript, and in `fixtures/contract.json` in 
 | Temperature and wind display | `display_temperature`, `display_wind_mph` and the TypeScript twins | yes |
 | "As of", hour labels, day labels | `format_as_of`, `hour_label`, `day_label` and the TypeScript twins | yes |
 | WMO code to label and icon id | `describe` | sample codes |
+| Day/night display icon id | `display_icon` / `displayIcon` | yes |
 | Web Mercator tile math | `lat_lon_to_tile`, `tile_window` | yes |
 | IEM tile URL and radar frame lists | `iem_tile_url`, `web_radar_frames`, `applet_radar_frames` | yes |
 | HTTP to upstream hosts | `HttpClient` or the Worker | no |
 | Painted map | `compose_radar_map`, `compose_viewport`, or `RadarMap.tsx` | no |
-| Hourly chart and daily range bar | `chartPoints`, `rangePlacement` | no |
+| Hourly chart and daily range bar | `chart_points` / `chartPoints`, `range_placement` / `rangePlacement` | yes |
 | Panel icon names | `symbolic_icon` | no |
 
 Both contract tests load `fixtures/contract.json`, `zippopotam-55115.json`, `open-meteo-55115.json`, and the NWS alert fixtures. Rust: `crates/coldfront-core/tests/contract.rs`. Web: `apps/coldfront-web/lib/contract.test.ts`.
@@ -33,8 +34,8 @@ Both clients request the same document. Units stay metric inside the model. Disp
 
 Query fields:
 
-- `current`: `temperature_2m`, `relative_humidity_2m`, `apparent_temperature`, `weather_code`, `wind_speed_10m`
-- `hourly`: `temperature_2m`, `weather_code`, `precipitation_probability`
+- `current`: `temperature_2m`, `relative_humidity_2m`, `apparent_temperature`, `weather_code`, `wind_speed_10m`, `is_day`
+- `hourly`: `temperature_2m`, `weather_code`, `precipitation_probability`, `is_day`
 - `daily`: `weather_code`, `temperature_2m_max`, `temperature_2m_min`, `precipitation_probability_max`
 - `temperature_unit=celsius`
 - `wind_speed_unit=kmh`
@@ -76,7 +77,9 @@ Rounding is half away from zero. `-1.5` becomes `-2`. Non-finite values become `
 | 95, 96, 99 | Thunderstorm | `thunder` |
 | anything else | Unknown | `unknown` |
 
-Web draws those icon ids as SVG. Applet maps them through `symbolic_icon` to freedesktop names such as `weather-clear-symbolic`. A missing theme icon falls back inside COSMIC. The text label still shows. After startup, a valid saved ZIP loads the forecast so the panel icon matches the current condition. With no forecast loaded, the panel icon is `weather-clear-symbolic` and the temperature is hidden. Active alerts add `dialog-warning-symbolic` beside the weather icon.
+`display_icon` / `displayIcon` takes a `describe` icon id and Open-Meteo `is_day`. At night, `clear`, `mainly-clear`, and `partly-cloudy` become `clear-night`, `mainly-clear-night`, and `partly-cloudy-night`. Other conditions keep the day icon. Current and hourly rows carry `is_day` from the place timezone. The 10-day list stays on day icons.
+
+Web draws those icon ids as SVG (sun or moon). Applet popup SVGs match. The panel maps them through `symbolic_icon` to freedesktop names such as `weather-clear-symbolic` or `weather-clear-night-symbolic`. A missing theme icon falls back inside COSMIC. The text label still shows. After startup, a valid saved ZIP loads the forecast so the panel icon matches the current condition. With no forecast loaded, the panel icon is `weather-clear-symbolic` and the temperature is hidden. Active alerts add `dialog-warning-symbolic` beside the weather icon.
 
 ## Worker API
 
@@ -128,7 +131,7 @@ Until the first frame draws radar pixels, the card says "Loading radar…". If t
 
 ### Applet
 
-The Radar tab uses `map_viewport` and `compose_viewport`. The camera starts at zoom 7 with zero pan. Zoom stays from 5 to 11. Drag pans. Mouse wheel zooms. Trackpad pixel scroll pans; Ctrl plus scroll zooms. Zoom in/out and recenter buttons sit under the map. View size is 800 by 480. Tiles are cached by source, zoom, and coordinates. Every pan/zoom recomposites basemap and radar together from whatever tiles are already cached (missing cells stay holes), matching the web canvas paint path. A 50 ms settle debounce fetches newly visible edge tiles for the shown frame and every frame already ready, without blanking the map. Failed tile fetches stay absent so the next settle can retry. Stale fetch tasks still merge successful tiles into the cache.
+The Radar tab uses `map_viewport` and `compose_viewport`. The camera starts at zoom 7 with zero pan. Zoom stays from 5 to 11. Drag pans. Mouse wheel zooms. Trackpad pixel scroll pans; Ctrl plus scroll zooms. Zoom in/out, recenter, and expand/restore buttons overlay the map (same idea as the web). The timeline and play control sit under the map. Compact view size is 400 by 220 inside the 480×440 popup; expanded view size follows the monitor-sized popup minus chrome. Tiles are cached by source, zoom, and coordinates. Every pan/zoom recomposites basemap and radar together from whatever tiles are already cached (missing cells stay holes), matching the web canvas paint path. A 50 ms settle debounce fetches newly visible edge tiles for the shown frame and every frame already ready, without blanking the map. Failed tile fetches stay absent so the next settle can retry. Stale fetch tasks still merge successful tiles into the cache.
 
 `compose_radar_map` still paints a pale background (`213, 227, 236`), blits basemap and radar tiles, crops around the pin, and resizes to 400 by 260. That path stays for unit and contract tests. The interactive tab does not use it.
 

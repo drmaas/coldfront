@@ -57,7 +57,7 @@ Web page: current conditions, next 24 hours, 10-day list, radar, up to three ale
 
 Change a shared rule in Rust, TypeScript, and `fixtures/contract.json` in one change. Both contract tests load the same fixtures. See [Contract lock](reference.md#contract-lock) for the full rule table.
 
-Stay in TypeScript: `chartPoints`, `rangePlacement`. Stay in Rust: `compose_radar_map`, `compose_viewport`, `HttpClient`, `symbolic_icon`.
+Shared chart helpers: `chart_points` / `chartPoints`, `range_placement` / `rangePlacement`. Shared day/night icons: `display_icon` / `displayIcon`. Stay in Rust: `compose_radar_map`, `compose_viewport`, `HttpClient`, `symbolic_icon`.
 
 ## Data flow
 
@@ -124,13 +124,13 @@ Worker details, cache headers, and validation: [Worker API](reference.md#worker-
 
 App id `io.github.drmaas.CosmicColdfront`. `init` reads cosmic-config and does not fetch. After startup, a valid saved ZIP loads place, forecast, and alerts so the panel icon and temperature match. Closing the popup keeps memory; reopening does not refetch weather when `forecast` is set. Radar tiles load when the Radar tab opens.
 
-Popup tabs are Current, Radar, Hourly, and 10-day. Settings and Alerts open from the header (not tab-bar segments). Current, Hourly, 10-day, Alerts, and Settings use a 480px-wide popup. Radar resizes that popup to about 960×820. Invalid ZIP bumps `generation`, clears place and forecast, and returns with no network. Alert HTTP failure becomes an empty list. A failed same-ZIP refresh keeps the last forecast. Stale `generation` / `map_generation` results are ignored.
+Popup tabs are Current, Radar, Hourly, and 10-day. Settings and Alerts open from the header (not tab-bar segments). Every tab uses a fixed 480×440 popup. Radar Full screen asks the Wayland popup to grow toward the monitor (`set_size` on the popup, not a toplevel resize) and Restore returns it to 480×440 beside the panel. Invalid ZIP bumps `generation`, clears place and forecast, and returns with no network. Alert HTTP failure becomes an empty list. A failed same-ZIP refresh keeps the last forecast. Stale `generation` / `map_generation` results are ignored.
 
 Config version 1: `zip`, `fahrenheit` (default true), `maptiler_api_key`, `allow_osm_basemap` (default false). Unit changes save without reload. ZIP changes refetch weather. Key and OSM toggle reload the map after the Radar tab has been opened.
 
 ## Radar and basemap
 
-Both clients draw IEM NEXRAD tiles. Web uses a 2D canvas (zoom 5–11, twelve frames at 750 ms). Applet Radar tab composites into an 800×480 viewport (zoom 5–11, pan/zoom gestures, offsets 50…0, 800 ms loop while the Radar tab is open) inside a ~960×820 popup. `compose_radar_map` (400×260) remains for contract tests. Frame lists and layer names: [Radar](reference.md#radar).
+Both clients draw IEM NEXRAD tiles. Web uses a 2D canvas (zoom 5–11, twelve frames at 750 ms). Applet Radar tab composites into a viewport that matches the map widget (about 400×220 when compact; larger when expanded), with zoom 5–11, pan/zoom gestures, offsets 50…0, and an 800 ms loop while the Radar tab is open. Zoom and expand controls overlay the map, inset from the top-right; the frame slider stays below. `compose_radar_map` (400×260) remains for contract tests. Frame lists and layer names: [Radar](reference.md#radar).
 
 ```mermaid
 flowchart TD

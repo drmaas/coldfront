@@ -15,8 +15,10 @@ Do not call the web Worker from the applet.
 ## Rules
 
 - Popup tabs are Current, Radar, Hourly, and 10-day. Settings and Alerts open from the header gear and alert button (not tab-bar segments). Radar is a tab, not stacked above the facts.
+- Keep the popup at 480×440 for every tab. Radar may expand toward the monitor and restore to that size; leaving Radar or closing the popup clears expand.
+- Hourly draws a 24-hour temperature strip with `chart_points`. The 10-day tab draws high/low range bars with `range_placement`. Forecast icons in the popup can be inline SVGs; the panel icon stays `symbolic_icon`.
 - `init` must not fetch. After startup, a valid saved ZIP loads place, forecast, and alerts so the panel icon matches. Radar tiles load only when the Radar tab is open (or was opened and needs a reload).
-- Call `HttpClient` for ZIP, forecast, and alerts. Call `mapload` for tiles. Call `compose_viewport` for the interactive Radar tab.
+- Call `HttpClient` for ZIP, forecast, and alerts. Call `mapload` for tiles. Call `compose_viewport` for the interactive Radar tab. Map view size follows the image widget (compact or expanded).
 - Load the latest radar frame (offset 0) before older frames. Offsets stay 50, 40, 30, 20, 10, 0. Interactive zoom is 5–11. Playback is 800 ms while the popup is open on the Radar tab with at least two frames.
 - Pan/zoom always recomposites basemap + radar from the tile cache (holes for missing tiles). Prefetch edge tiles while dragging; settle without blanking the map.
 - Ignore applying `WeatherReady`, `MapReady`, `OlderFrame`, and `FrameSkipped` when `generation` / `map_generation` does not match. Stale `MapReady` / `OlderFrame` still merge successful tiles into the cache.

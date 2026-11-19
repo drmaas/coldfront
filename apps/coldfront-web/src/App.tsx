@@ -3,6 +3,7 @@ import {
   chartPoints,
   dayLabel,
   describe,
+  displayIcon,
   displayTemperature,
   displayWindMph,
   formatAsOf,
@@ -211,6 +212,7 @@ function ForecastBody({ data, units }: { data: ForecastData; units: Units }) {
     ? `${displayWindMph(current.windKmh)} mph`
     : `${roundHalfAwayFromZero(current.windKmh)} km/h`;
   const condition = describe(current.weatherCode);
+  const currentIcon = displayIcon(condition.icon, current.isDay);
 
   return (
     <div className="forecast-grid">
@@ -219,7 +221,7 @@ function ForecastBody({ data, units }: { data: ForecastData; units: Units }) {
           {place.city}, {place.stateAbbreviation} {place.zip}
         </p>
         <div className="now">
-          <WeatherIcon name={condition.icon} />
+          <WeatherIcon name={currentIcon} />
           <div>
             <p className="temp">
               {displayTemperature(current.temperatureC, fahrenheit)}
@@ -259,7 +261,7 @@ function ForecastBody({ data, units }: { data: ForecastData; units: Units }) {
                 const info = describe(hour.weatherCode);
                 return (
                   <div className="hour" key={hour.time}>
-                    <WeatherIcon name={info.icon} />
+                    <WeatherIcon name={displayIcon(info.icon, hour.isDay)} />
                     <span className="hour-temp">{temps[index]}°</span>
                   </div>
                 );

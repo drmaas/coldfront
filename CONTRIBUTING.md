@@ -76,25 +76,19 @@ Shared behavior is locked by `fixtures/contract.json`. The Rust test is `crates/
 
 When a shared rule changes, update the fixture and both tests in one change. `just test` must pass before you open a pull request.
 
-CI on pull requests and on `main` runs three jobs:
-
-- Web: `pnpm install --frozen-lockfile`, Worker types `--check`, lint, typecheck, test, build.
-- Rust: fmt, clippy `-D warnings`, `cargo test --workspace --locked`. Clippy and tests already compile the applet, so CI does not run a separate `cargo build`.
-- Secret scan: gitleaks.
-
-After CI succeeds on a push to `main`, `.github/workflows/deploy.yml` builds the web app and runs `wrangler deploy`. Manual deploys still work. CI does not build the Arch package.
+CI on pull requests and on `main` runs web, rust, and secret-scan jobs. A push to `main` that passes those three then runs a deploy job in the same workflow. Manual deploys from your machine still work. CI does not build the Arch package.
 
 ## Deploy the web app
 
 ### From GitHub Actions
 
-A successful CI run on a push to `main` deploys the Worker. Set repository secret `CLOUDFLARE_API_TOKEN` first. The token needs Workers Scripts Edit on this account. Create one with the [Workers Scripts token template](https://dash.cloudflare.com/?to=/:account/api-tokens&permissionGroupKeys=%5B%7B%22key%22%3A%22workers_scripts%22%2C%22type%22%3A%22edit%22%7D%5D&name=coldfront%20GitHub%20Actions), then:
+A push to `main` that passes web, rust, and gitleaks deploys the Worker. Pull requests and `workflow_dispatch` do not deploy. Set repository secret `CLOUDFLARE_API_TOKEN` first. Prefer an Account API token with Workers **Editor** scoped to Worker `coldfront` ([Workers roles](https://developers.cloudflare.com/workers/authorization/workers/)). Legacy Workers Scripts Edit still deploys today; no kill date yet. Then:
 
 ```bash
 gh secret set CLOUDFLARE_API_TOKEN --repo drmaas/coldfront
 ```
 
-`account_id` is in `apps/coldfront-web/wrangler.jsonc`. Keep the API token out of that file. You can also start a deploy from the Actions tab with `workflow_dispatch`.
+`account_id` is in `apps/coldfront-web/wrangler.jsonc` and is also passed into `wrangler-action`. Keep the API token out of that file. The deploy job rebuilds the web app before `wrangler deploy`, same pattern as a second production build after the CI gate.
 
 ### From your machine
 

@@ -12,23 +12,23 @@ Do not put product behavior here.
 
 ## Workflows
 
-`ci.yml` runs on pull requests, pushes to `main`, and `workflow_dispatch`. It has three jobs. None of them publish.
+`ci.yml` runs on pull requests, pushes to `main`, and `workflow_dispatch`. It has four jobs.
 
 - `web` uses `pnpm/setup@v3` in `apps/coldfront-web` with Node LTS, store cache, and a frozen lockfile. Order is install, `pnpm exec wrangler types --include-runtime false --check`, lint, typecheck, test, build.
 - `rust` installs the COSMIC build libraries, then runs fmt, `cargo clippy --all-targets --locked -- -D warnings`, and `cargo test --workspace --locked`. Do not add a separate applet `cargo build` after those steps; clippy and tests already compile the workspace.
 - `secrets` runs gitleaks `v8.30.1` with `--redact`. Checkout uses `fetch-depth: 0`.
-
-`deploy.yml` deploys the Worker after a successful `CI` run on a push to `main`, and on `workflow_dispatch`. It needs repository secret `CLOUDFLARE_API_TOKEN`. Keep deploy out of `ci.yml`.
+- `deploy` needs `web`, `rust`, and `secrets`. It runs only when `github.event_name == 'push'` and the ref is `main`. It rebuilds the web app, then deploys with `cloudflare/wrangler-action@v4`. It needs repository secret `CLOUDFLARE_API_TOKEN`. Pull requests and `workflow_dispatch` never reach this job.
 
 `release-arch.yml` runs only on a push of a `v*` tag. It needs `permissions: contents: write`. The job uses the `archlinux:latest` container.
 
 ## Rules
 
-- Keep CI, deploy, and release in separate files. Do not build the Arch package on pull requests.
-- Do not put `CLOUDFLARE_API_TOKEN` in `ci.yml`. Deploy owns that secret.
-- Keep `ci.yml` free of `contents: write` and of repository secrets.
-- Deploy uses `cloudflare/wrangler-action@v4` from `apps/coldfront-web` after `pnpm run build`. Account id comes from `wrangler.jsonc`, not from a secret.
-- Deploy checks out `github.event.workflow_run.head_sha` when triggered by `workflow_run`. Manual runs use `github.sha`.
+- Keep CI and Arch release in separate files. Do not build the Arch package on pull requests.
+- Keep the Worker deploy job in `ci.yml`. Do not add a second workflow that uses `workflow_run`.
+- Do not put `CLOUDFLARE_API_TOKEN` on `web`, `rust`, or `secrets`. Only the `deploy` job may reference it.
+- Keep `ci.yml` free of `contents: write`. The `deploy` job may use `deployments: write` for `gitHubToken`.
+- Deploy uses `cloudflare/wrangler-action@v4` from `apps/coldfront-web` after `pnpm run build`. Pass `accountId` to the action (same value as `wrangler.jsonc`) so the action does not blank `CLOUDFLARE_ACCOUNT_ID`.
+- Deploy concurrency group is `coldfront-production` with `cancel-in-progress: false`.
 - Web stays on pnpm and Node LTS (`pnpm/setup` with `runtime: node@lts`). Rust stays on `dtolnay/rust-toolchain@stable` with rustfmt and clippy.
 - Cargo invocations in CI stay `--locked`. The PKGBUILD stays `--frozen`.
 - Keep the Ubuntu apt mirror rewrite in the `rust` job. The Azure Ubuntu mirror has failed DNS in this workflow. The install step timeout stays 3 minutes.
@@ -47,10 +47,10 @@ Do not put product behavior here.
 - `check-version.sh` exits 1 on a version mismatch and exits 2 when the tag argument is missing. The release stops before `makepkg`.
 - gitleaks exits non-zero when it finds a secret. Do not add `--no-git` or a skip that hides tracked history.
 - A missing `.pkg.tar.zst` fails the artifact upload. Do not set `if-no-files-found` to `warn` or `ignore`.
-- Deploy fails when `CLOUDFLARE_API_TOKEN` is missing or lacks Workers Scripts Edit on this account.
+- Deploy fails when `CLOUDFLARE_API_TOKEN` is missing or lacks Workers Editor on Worker `coldfront`.
 
 ## Example
 
 Good: add a CI step that still uses `--locked` and keeps clippy `-D warnings`.
 
-Bad: trigger `release-arch.yml` from `pull_request`, or put `wrangler deploy` inside `ci.yml`.
+Bad: trigger `release-arch.yml` from `pull_request`, or start deploy with `workflow_run`.

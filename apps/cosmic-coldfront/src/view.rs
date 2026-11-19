@@ -389,7 +389,11 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
 
     let zoom_controls = widget::Column::new()
         .spacing(spacing.space_xxs)
-        .push(map_button("list-add-symbolic", Message::ZoomIn, fl!("tooltip-zoom-in")))
+        .push(map_button(
+            "list-add-symbolic",
+            Message::ZoomIn,
+            fl!("tooltip-zoom-in"),
+        ))
         .push(map_button(
             "list-remove-symbolic",
             Message::ZoomOut,
@@ -400,7 +404,11 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
             Message::Recenter,
             fl!("tooltip-recenter"),
         ))
-        .push(map_button(expand_icon, Message::ToggleRadarExpand, expand_tip));
+        .push(map_button(
+            expand_icon,
+            Message::ToggleRadarExpand,
+            expand_tip,
+        ));
 
     let overlay = widget::container(zoom_controls)
         .width(Length::Fill)
@@ -449,13 +457,11 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
         .width(Length::Fill)
         .push(stage)
         .push(timeline)
-        .push(
-            widget::text::caption(format!(
-                "{} · {}",
-                app.current_frame_label(),
-                app.basemap_caption()
-            )),
-        );
+        .push(widget::text::caption(format!(
+            "{} · {}",
+            app.current_frame_label(),
+            app.basemap_caption()
+        )));
 
     if app.radar_tiles == 0 && app.map_handle.is_some() {
         col = col.push(widget::text::caption(fl!("radar-missing")));
@@ -663,11 +669,7 @@ fn stat_row(
         .into()
 }
 
-fn map_button(
-    icon: &'static str,
-    message: Message,
-    tip: String,
-) -> Element<'static, Message> {
+fn map_button(icon: &'static str, message: Message, tip: String) -> Element<'static, Message> {
     widget::tooltip::tooltip(
         widget::button::icon(widget::icon::from_name(icon))
             .on_press(message)

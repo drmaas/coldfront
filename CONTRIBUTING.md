@@ -55,7 +55,20 @@ just applet build-release
 just applet run
 ```
 
-`just applet install` copies the release binary to `/usr/bin/cosmic-coldfront` and installs the desktop file, metainfo, and icon. That write needs permission for `/usr`. `just applet uninstall` removes those four files.
+Run those as yourself. `just applet run` needs your Wayland session. `sudo` drops `~/.cargo/bin` from `PATH`, so root cannot run `cargo`.
+
+Install and uninstall write under `/usr`. Build the release binary first. `install` depends on `build-release`, and `--no-deps` skips that rebuild so root only copies or deletes files:
+
+```bash
+just applet build-release
+sudo just --justfile apps/cosmic-coldfront/justfile --no-deps install
+```
+
+```bash
+sudo just --justfile apps/cosmic-coldfront/justfile --no-deps uninstall
+```
+
+`install` writes `/usr/bin/cosmic-coldfront`, the desktop file, the metainfo, and the icon. `uninstall` removes those four files. `sudo just applet install` rebuilds as root, fails to find `cargo`, and can leave `target/` owned by root.
 
 The desktop file, metainfo, and icon are static files under `apps/cosmic-coldfront/resources`. Install does not generate them.
 

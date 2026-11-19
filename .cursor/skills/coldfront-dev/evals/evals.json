@@ -1,0 +1,43 @@
+{
+  "skill_name": "coldfront-dev",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Install the Coldfront COSMIC applet on this machine so it shows in the panel. I'm at the repo root. Write the exact commands you would run, and any warning about what not to run, to commands.md. Do not execute them.",
+      "expected_output": "Build with just applet build-release as the user, then sudo just --justfile apps/cosmic-coldfront/justfile --no-deps install. Warn against sudo just applet install and sudo just applet run.",
+      "files": [],
+      "expectations": [
+        "Output includes just applet build-release and that line is not prefixed with sudo",
+        "Output includes sudo just --justfile apps/cosmic-coldfront/justfile --no-deps install",
+        "Output does not recommend sudo just applet install",
+        "Output does not recommend sudo just applet run"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I ran sudo just applet run and got env: 'cargo': No such file or directory. I still want the applet running, and I want it installed and to know how to uninstall. Write the commands and the reason to answer.md. Do not execute them.",
+      "expected_output": "Run just applet run without sudo. Explain that sudo drops ~/.cargo/bin. Install and uninstall use the --no-deps justfile commands.",
+      "files": [],
+      "expectations": [
+        "Output tells the user to run just applet run without sudo",
+        "Output explains that sudo drops PATH so cargo in ~/.cargo/bin is missing",
+        "Output includes sudo just --justfile apps/cosmic-coldfront/justfile --no-deps install",
+        "Output includes sudo just --justfile apps/cosmic-coldfront/justfile --no-deps uninstall",
+        "Output does not recommend sudo just applet install"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Run the Coldfront website locally so I can look at a forecast. Don't deploy. Write the steps to web.md. Do not start the server.",
+      "expected_output": "From apps/coldfront-web, copy .dev.vars.example when needed, pnpm install, pnpm run dev, open http://localhost:5173. Do not deploy.",
+      "files": [],
+      "expectations": [
+        "Steps run from apps/coldfront-web",
+        "Steps include pnpm install and pnpm run dev",
+        "Steps mention http://localhost:5173",
+        "Steps mention .dev.vars or .dev.vars.example and say not to commit it",
+        "Steps do not include wrangler deploy"
+      ]
+    }
+  ]
+}

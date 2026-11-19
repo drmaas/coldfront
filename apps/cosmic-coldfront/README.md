@@ -21,3 +21,7 @@ just applet install
 ```
 
 `just applet install` writes `/usr/bin/cosmic-coldfront` plus the desktop file, metainfo, and icon. Full steps are in [CONTRIBUTING.md](../../CONTRIBUTING.md).
+
+## Credits
+
+COSMIC panel applet structure draws from [Tempest](https://github.com/crenshawdev/tempest).

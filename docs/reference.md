@@ -79,7 +79,7 @@ Rounding is half away from zero. `-1.5` becomes `-2`. Non-finite values become `
 
 `display_icon` / `displayIcon` takes a `describe` icon id and Open-Meteo `is_day`. At night, `clear`, `mainly-clear`, and `partly-cloudy` become `clear-night`, `mainly-clear-night`, and `partly-cloudy-night`. Other conditions keep the day icon. Current and hourly rows carry `is_day` from the place timezone. The 10-day list stays on day icons.
 
-Web draws those icon ids as SVG (sun or moon). Applet popup SVGs match. The panel maps them through `symbolic_icon` to freedesktop names such as `weather-clear-symbolic` or `weather-clear-night-symbolic`. A missing theme icon falls back inside COSMIC. The text label still shows. After startup, a valid saved ZIP loads the forecast so the panel icon matches the current condition. With no forecast loaded, the panel icon is `weather-clear-symbolic` and the temperature is hidden. Active alerts add `dialog-warning-symbolic` beside the weather icon.
+Web draws those icon ids as SVG (sun or moon). Applet popup SVGs match. The panel maps them through `symbolic_icon` to freedesktop names such as `weather-clear-symbolic` or `weather-clear-night-symbolic`. A missing theme icon falls back inside COSMIC. The text label still shows. After startup, a valid saved ZIP loads the forecast so the panel shows the condition icon and the rounded temperature with its unit, for example `53°F`. On a horizontal panel the temperature sits to the right of the icon. On a vertical panel it sits under the icon. With no forecast loaded, the panel icon is `weather-clear-symbolic` and the temperature is hidden. Active alerts add `dialog-warning-symbolic` beside the weather icon.
 
 ## Worker API
 

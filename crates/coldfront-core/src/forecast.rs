@@ -23,6 +23,8 @@ pub struct Current {
     pub humidity: i32,
     pub wind_kmh: f64,
     pub weather_code: i32,
+    /// Open-Meteo day/night flag for the place timezone (`1` day, `0` night).
+    pub is_day: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -31,6 +33,7 @@ pub struct Hour {
     pub temperature_c: f64,
     pub weather_code: i32,
     pub precip_probability: i32,
+    pub is_day: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -60,9 +63,11 @@ pub fn parse_open_meteo(bytes: &[u8]) -> Result<Forecast, Error> {
     let hour_temps = number_array(hourly, "temperature_2m")?;
     let hour_codes = number_array(hourly, "weather_code")?;
     let hour_pops = number_array(hourly, "precipitation_probability")?;
+    let hour_is_day = number_array(hourly, "is_day")?;
     if hour_times.len() != hour_temps.len()
         || hour_times.len() != hour_codes.len()
         || hour_times.len() != hour_pops.len()
+        || hour_times.len() != hour_is_day.len()
     {
         return Err(Error::Parse("hourly length mismatch".into()));
     }
@@ -85,12 +90,16 @@ pub fn parse_open_meteo(bytes: &[u8]) -> Result<Forecast, Error> {
         .zip(hour_temps)
         .zip(hour_codes)
         .zip(hour_pops)
-        .map(|(((time, temperature_c), weather_code), precip)| Hour {
-            time,
-            temperature_c,
-            weather_code: round_code(weather_code),
-            precip_probability: round_code(precip),
-        })
+        .zip(hour_is_day)
+        .map(
+            |((((time, temperature_c), weather_code), precip), is_day)| Hour {
+                time,
+                temperature_c,
+                weather_code: round_code(weather_code),
+                precip_probability: round_code(precip),
+                is_day: is_day != 0.0,
+            },
+        )
         .collect();
     let daily_rows = day_times
         .into_iter()
@@ -120,6 +129,7 @@ pub fn parse_open_meteo(bytes: &[u8]) -> Result<Forecast, Error> {
             humidity: round_code(number(current, "relative_humidity_2m")?),
             wind_kmh: number(current, "wind_speed_10m")?,
             weather_code: round_code(number(current, "weather_code")?),
+            is_day: number(current, "is_day")? != 0.0,
         },
         hourly: hourly_rows,
         daily: daily_rows,

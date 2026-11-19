@@ -3,8 +3,10 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   appletRadarFrames,
+  chartPoints,
   dayLabel,
   describe as describeCode,
+  displayIcon,
   displayTemperature,
   displayWindMph,
   formatAsOf,
@@ -16,6 +18,7 @@ import {
   parseAlerts,
   parseOpenMeteo,
   parseZippopotam,
+  rangePlacement,
   roundHalfAwayFromZero,
   tileWindow,
   webRadarFrames,
@@ -45,6 +48,13 @@ const contract = fixture("contract.json") as {
     weather_code: number;
     label: string;
     icon: string;
+    is_day: boolean;
+  };
+  display_icons: {
+    mainly_clear_day: string;
+    clear_night: string;
+    partly_cloudy_night: string;
+    rain_night: string;
   };
   hourly_count: number;
   daily_count: number;
@@ -55,6 +65,15 @@ const contract = fixture("contract.json") as {
   daily4_pop: number;
   display: { temp_f: number; apparent_f: number; temp_c: number; wind_mph: number };
   rounding: { input: number; away_from_zero: number };
+  chart: {
+    values: number[];
+    column_width: number;
+    height: number;
+    pad: number;
+    points: Array<{ x: number; y: number }>;
+    range: { low: number; high: number; scale_min: number; scale_max: number; left: number; width: number };
+    equal_range: { low: number; high: number; scale_min: number; scale_max: number; left: number; width: number };
+  };
   tile: { zoom: number; x: number; y: number; pixel_x: number; pixel_y: number; url: string };
   window: { zoom: number; span: number; origin_x: number; origin_y: number; pin_x: number; pin_y: number };
   web_frames: number;
@@ -95,10 +114,17 @@ describe("shared fixtures", () => {
       label: contract.current.label,
       icon: contract.current.icon,
     });
+    expect(forecast.current.isDay).toBe(contract.current.is_day);
+    expect(displayIcon("mainly-clear", true)).toBe(contract.display_icons.mainly_clear_day);
+    expect(displayIcon("clear", false)).toBe(contract.display_icons.clear_night);
+    expect(displayIcon("partly-cloudy", false)).toBe(contract.display_icons.partly_cloudy_night);
+    expect(displayIcon("rain", false)).toBe(contract.display_icons.rain_night);
 
     const hours = nextHours(forecast, 24);
     expect(hours).toHaveLength(24);
     expect(hours[0].time).toBe(contract.next_hour_time);
+    expect(hours[0].isDay).toBe(true);
+    expect(hours[1].isDay).toBe(false);
     expect(hours.slice(0, 9).map((hour, index) => hourLabel(hour.time, index === 0))).toEqual(
       contract.next_hour_labels,
     );
@@ -115,6 +141,33 @@ describe("shared fixtures", () => {
     expect(displayTemperature(forecast.current.temperatureC, false)).toBe(contract.display.temp_c);
     expect(displayWindMph(forecast.current.windKmh)).toBe(contract.display.wind_mph);
     expect(roundHalfAwayFromZero(contract.rounding.input)).toBe(contract.rounding.away_from_zero);
+    const points = chartPoints(
+      contract.chart.values,
+      contract.chart.column_width,
+      contract.chart.height,
+      contract.chart.pad,
+    );
+    expect(points).toHaveLength(contract.chart.points.length);
+    for (const [index, point] of points.entries()) {
+      expect(point.x).toBeCloseTo(contract.chart.points[index].x, 3);
+      expect(point.y).toBeCloseTo(contract.chart.points[index].y, 3);
+    }
+    const bar = rangePlacement(
+      contract.chart.range.low,
+      contract.chart.range.high,
+      contract.chart.range.scale_min,
+      contract.chart.range.scale_max,
+    );
+    expect(bar.left).toBeCloseTo(contract.chart.range.left, 3);
+    expect(bar.width).toBeCloseTo(contract.chart.range.width, 3);
+    const equal = rangePlacement(
+      contract.chart.equal_range.low,
+      contract.chart.equal_range.high,
+      contract.chart.equal_range.scale_min,
+      contract.chart.equal_range.scale_max,
+    );
+    expect(equal.left).toBeCloseTo(contract.chart.equal_range.left, 3);
+    expect(equal.width).toBeCloseTo(contract.chart.equal_range.width, 3);
   });
 
   it("maps weather codes", () => {

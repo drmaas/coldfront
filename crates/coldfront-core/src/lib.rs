@@ -6,6 +6,7 @@
 //! TypeScript implementation and both run the JSON fixtures in `fixtures/`.
 
 pub mod alerts;
+pub mod chart;
 pub mod client;
 pub mod error;
 pub mod forecast;
@@ -16,6 +17,7 @@ pub mod weather;
 pub mod zipcode;
 
 pub use alerts::{Alert, parse_alerts};
+pub use chart::{ChartPoint, RangePlacement, chart_points, range_placement};
 pub use client::HttpClient;
 pub use error::Error;
 pub use forecast::{
@@ -32,5 +34,5 @@ pub use units::{
     celsius_to_fahrenheit, display_temperature, display_wind_mph, kmh_to_mph,
     round_half_away_from_zero,
 };
-pub use weather::{WeatherInfo, describe, symbolic_icon};
+pub use weather::{WeatherInfo, describe, display_icon, symbolic_icon};
 pub use zipcode::is_us_zip;

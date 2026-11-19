@@ -5,7 +5,9 @@ use std::time::Duration;
 use cosmic::iced::keyboard::{self, Modifiers};
 use cosmic::iced::mouse::Button as MouseButton;
 use cosmic::iced::mouse::ScrollDelta;
-use cosmic::iced::platform_specific::shell::wayland::commands::popup::{destroy_popup, get_popup};
+use cosmic::iced::platform_specific::shell::wayland::commands::popup::{
+    destroy_popup, get_popup, set_size as set_popup_size,
+};
 use cosmic::iced::window::{self, Id};
 use cosmic::iced::{Event, Limits, Point, Size, Subscription, Task, event};
 use cosmic::prelude::*;
@@ -14,7 +16,7 @@ use cosmic::widget::segmented_button;
 
 use coldfront_core::{
     APPLET_ZOOM_MAX, APPLET_ZOOM_MIN, Alert, Forecast, HttpClient, Place, applet_radar_frames,
-    describe, display_temperature, is_us_zip, symbolic_icon,
+    describe, display_icon, display_temperature, is_us_zip, symbolic_icon,
 };
 
 use crate::config::{self, Config};
@@ -28,9 +30,10 @@ use crate::view;
 pub const APP_ID: &str = "io.github.drmaas.CosmicColdfront";
 
 const POPUP_WIDTH: f32 = 480.0;
-const POPUP_MAX_HEIGHT: f32 = 720.0;
-const RADAR_POPUP_WIDTH: f32 = 960.0;
-const RADAR_POPUP_HEIGHT: f32 = 820.0;
+const POPUP_HEIGHT: f32 = 440.0;
+const RADAR_EXPAND_FALLBACK_WIDTH: f32 = 960.0;
+const RADAR_EXPAND_FALLBACK_HEIGHT: f32 = 820.0;
+const RADAR_EXPAND_MARGIN: f32 = 64.0;
 const WEATHER_REFRESH: Duration = Duration::from_secs(30 * 60);
 /// Debounce before fetching newly visible edge tiles. Short so pan feels like
 /// the web canvas (tiles stream in while the camera moves).
@@ -81,6 +84,8 @@ pub struct AppModel {
     pointer: Option<Point>,
     ctrl_held: bool,
     radar_opened: bool,
+    pub(crate) radar_expanded: bool,
+    expanded_size: Option<Size>,
     startup_fetch_done: bool,
 }
 
@@ -119,6 +124,8 @@ pub enum Message {
     ZoomIn,
     ZoomOut,
     Recenter,
+    ToggleRadarExpand,
+    RadarExpandWith(Option<Size>),
     MapPress,
     MapRelease,
     MapMove(Point),
@@ -212,6 +219,8 @@ impl cosmic::Application for AppModel {
             pointer: None,
             ctrl_held: false,
             radar_opened: false,
+            radar_expanded: false,
+            expanded_size: None,
             startup_fetch_done: false,
         };
         (app, Task::none())
@@ -275,6 +284,8 @@ impl cosmic::Application for AppModel {
                 if self.popup == Some(id) {
                     self.popup = None;
                     self.drag = None;
+                    self.radar_expanded = false;
+                    self.expanded_size = None;
                 }
             }
             Message::Surface(action) => return Task::done(cosmic::action::surface(action)),
@@ -358,6 +369,17 @@ impl cosmic::Application for AppModel {
                 self.recompose_current();
                 return self.schedule_settle();
             }
+            Message::ToggleRadarExpand => {
+                if self.radar_expanded {
+                    return self.collapse_radar();
+                }
+                let Some(id) = self.core.main_window_id().or(self.popup) else {
+                    return Task::none();
+                };
+                return window::monitor_size(id)
+                    .map(|size| cosmic::Action::App(Message::RadarExpandWith(size)));
+            }
+            Message::RadarExpandWith(size) => return self.expand_radar(size),
             Message::MapPress => {
                 if let Some(point) = self.pointer {
                     self.drag = Some(DragState {
@@ -378,7 +400,6 @@ impl cosmic::Application for AppModel {
                     self.pan_x = drag.pan_x + f64::from(point.x - drag.start.x);
                     self.pan_y = drag.pan_y + f64::from(point.y - drag.start.y);
                     self.recompose_current();
-                    return self.schedule_settle();
                 }
             }
             Message::MapScroll(delta) => return self.handle_scroll(delta),
@@ -489,8 +510,12 @@ impl cosmic::Application for AppModel {
 impl AppModel {
     fn toggle_popup(&mut self) -> Task<cosmic::Action<Message>> {
         if let Some(id) = self.popup.take() {
+            self.radar_expanded = false;
+            self.expanded_size = None;
             return destroy_popup(id);
         }
+        self.radar_expanded = false;
+        self.expanded_size = None;
         let Some(parent) = self.core.main_window_id() else {
             return Task::none();
         };
@@ -510,7 +535,8 @@ impl AppModel {
     }
 
     fn select_tab(&mut self, tab: PopupTab) -> Task<cosmic::Action<Message>> {
-        let previous = self.active_tab;
+        let leaving_expanded_radar =
+            self.radar_expanded && self.active_tab == PopupTab::Radar && tab != PopupTab::Radar;
         self.active_tab = tab;
         self.tab_model = if matches!(tab, PopupTab::Settings | PopupTab::Alerts) {
             build_tab_model_none()
@@ -518,10 +544,8 @@ impl AppModel {
             build_tab_model(tab)
         };
         let mut tasks = Vec::new();
-        if let Some(id) = self.popup
-            && (previous == PopupTab::Radar || tab == PopupTab::Radar)
-        {
-            tasks.push(window::resize(id, self.popup_size()));
+        if leaving_expanded_radar {
+            tasks.push(self.collapse_radar());
         }
         if tab == PopupTab::Radar {
             self.radar_opened = true;
@@ -532,32 +556,73 @@ impl AppModel {
         Task::batch(tasks)
     }
 
+    fn expand_radar(&mut self, monitor: Option<Size>) -> Task<cosmic::Action<Message>> {
+        let size = match monitor {
+            Some(size) => Size::new(
+                (size.width - RADAR_EXPAND_MARGIN).max(POPUP_WIDTH),
+                (size.height - RADAR_EXPAND_MARGIN).max(POPUP_HEIGHT),
+            ),
+            None => Size::new(RADAR_EXPAND_FALLBACK_WIDTH, RADAR_EXPAND_FALLBACK_HEIGHT),
+        };
+        self.radar_expanded = true;
+        self.expanded_size = Some(size);
+        Task::batch([self.resize_popup(), self.apply_radar_size_change()])
+    }
+
+    fn collapse_radar(&mut self) -> Task<cosmic::Action<Message>> {
+        self.radar_expanded = false;
+        self.expanded_size = None;
+        Task::batch([self.resize_popup(), self.apply_radar_size_change()])
+    }
+
+    /// `window::resize` does not reach an xdg popup. Size goes through the popup positioner.
+    fn resize_popup(&self) -> Task<cosmic::Action<Message>> {
+        let Some(id) = self.popup else {
+            return Task::none();
+        };
+        let size = self.popup_size();
+        set_popup_size(
+            id,
+            size.width.round().max(1.0) as u32,
+            size.height.round().max(1.0) as u32,
+        )
+    }
+
+    fn apply_radar_size_change(&mut self) -> Task<cosmic::Action<Message>> {
+        self.recompose_current();
+        self.refresh_visible_map()
+    }
+
     fn popup_limits(&self) -> Limits {
-        if self.active_tab == PopupTab::Radar {
-            Limits::NONE
-                .min_width(RADAR_POPUP_WIDTH)
-                .max_width(RADAR_POPUP_WIDTH)
-                .min_height(400.0)
-                .max_height(RADAR_POPUP_HEIGHT)
-        } else {
-            Limits::NONE
-                .min_width(POPUP_WIDTH)
-                .max_width(POPUP_WIDTH)
-                .min_height(180.0)
-                .max_height(POPUP_MAX_HEIGHT)
-        }
+        let size = self.popup_size();
+        Limits::NONE
+            .min_width(size.width)
+            .max_width(size.width)
+            .min_height(size.height)
+            .max_height(size.height)
     }
 
     fn popup_size(&self) -> Size {
-        if self.active_tab == PopupTab::Radar {
-            Size::new(RADAR_POPUP_WIDTH, RADAR_POPUP_HEIGHT)
+        if self.radar_expanded {
+            self.expanded_size.unwrap_or(Size::new(
+                RADAR_EXPAND_FALLBACK_WIDTH,
+                RADAR_EXPAND_FALLBACK_HEIGHT,
+            ))
         } else {
-            Size::new(POPUP_WIDTH, 520.0)
+            Size::new(POPUP_WIDTH, POPUP_HEIGHT)
         }
     }
 
     pub(crate) fn popup_container_limits(&self) -> Limits {
         self.popup_limits()
+    }
+
+    pub(crate) fn popup_width(&self) -> f32 {
+        self.popup_size().width
+    }
+
+    pub(crate) fn popup_height(&self) -> f32 {
+        self.popup_size().height
     }
 
     fn start_weather_load(&mut self, zip_changed: bool) -> Task<cosmic::Action<Message>> {
@@ -634,6 +699,7 @@ impl AppModel {
         let zoom = self.zoom;
         let pan_x = self.pan_x;
         let pan_y = self.pan_y;
+        let (view_width, view_height) = self.map_size();
         let shown_offset = self.shown_offset;
         let mut cache = self.tile_cache.clone();
         cosmic::task::future(async move {
@@ -662,6 +728,8 @@ impl AppModel {
                 zoom,
                 pan_x,
                 pan_y,
+                view_width,
+                view_height,
                 offset_minutes: first_offset,
             };
             match mapload::ensure_map_frame(&client, &mut cache, &kind, &request).await {
@@ -709,6 +777,7 @@ impl AppModel {
         let zoom = self.zoom;
         let pan_x = self.pan_x;
         let pan_y = self.pan_y;
+        let (view_width, view_height) = self.map_size();
         let mut cache = self.tile_cache.clone();
         cosmic::task::future(async move {
             let client = match HttpClient::new() {
@@ -726,6 +795,8 @@ impl AppModel {
                 zoom,
                 pan_x,
                 pan_y,
+                view_width,
+                view_height,
                 offset_minutes: offset,
             };
             match mapload::ensure_map_frame(&client, &mut cache, &kind, &request).await {
@@ -787,12 +858,15 @@ impl AppModel {
         let Some(place) = &self.place else {
             return;
         };
+        let (view_width, view_height) = self.map_size();
         let viewport = viewport_for(
             place.latitude,
             place.longitude,
             self.zoom,
             self.pan_x,
             self.pan_y,
+            view_width,
+            view_height,
         );
         let kind = basemap_kind(&self.config);
         let Ok(frame) =
@@ -827,6 +901,7 @@ impl AppModel {
         let zoom = self.zoom;
         let pan_x = self.pan_x;
         let pan_y = self.pan_y;
+        let (view_width, view_height) = self.map_size();
         let shown_offset = self.shown_offset;
         let extra_offsets: Vec<u32> = self
             .frames_ready
@@ -858,6 +933,8 @@ impl AppModel {
                 zoom,
                 pan_x,
                 pan_y,
+                view_width,
+                view_height,
                 offset_minutes: shown_offset,
             };
             match mapload::ensure_map_frames(&client, &mut cache, &kind, &request, &extra_offsets)
@@ -953,7 +1030,10 @@ impl AppModel {
     pub(crate) fn panel_icon(&self) -> &'static str {
         self.forecast
             .as_ref()
-            .map(|forecast| symbolic_icon(describe(forecast.current.weather_code).icon))
+            .map(|forecast| {
+                let info = describe(forecast.current.weather_code);
+                symbolic_icon(display_icon(info.icon, forecast.current.is_day))
+            })
             .unwrap_or("weather-clear-symbolic")
     }
 
@@ -998,7 +1078,15 @@ impl AppModel {
     }
 
     pub(crate) fn map_size(&self) -> (u32, u32) {
-        (MAP_VIEW_WIDTH, MAP_VIEW_HEIGHT)
+        if self.radar_expanded {
+            let size = self.popup_size();
+            (
+                (size.width - 48.0).max(400.0) as u32,
+                (size.height - 220.0).max(240.0) as u32,
+            )
+        } else {
+            (MAP_VIEW_WIDTH, MAP_VIEW_HEIGHT)
+        }
     }
 
     pub(crate) fn dragging(&self) -> bool {

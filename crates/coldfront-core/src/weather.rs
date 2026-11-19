@@ -69,13 +69,50 @@ pub fn describe(code: i32) -> WeatherInfo {
     }
 }
 
+/// Day or night display icon id from a `describe` icon and Open-Meteo `is_day`.
+///
+/// Clear / mainly clear / partly cloudy swap to moon variants at night. Other
+/// conditions keep the day icon.
+#[must_use]
+pub fn display_icon(icon: &str, is_day: bool) -> &'static str {
+    if !is_day {
+        match icon {
+            "clear" => return "clear-night",
+            "mainly-clear" => return "mainly-clear-night",
+            "partly-cloudy" => return "partly-cloudy-night",
+            _ => {}
+        }
+    }
+    match icon {
+        "clear" => "clear",
+        "mainly-clear" => "mainly-clear",
+        "partly-cloudy" => "partly-cloudy",
+        "overcast" => "overcast",
+        "fog" => "fog",
+        "drizzle" => "drizzle",
+        "freezing-drizzle" => "freezing-drizzle",
+        "rain" => "rain",
+        "freezing-rain" => "freezing-rain",
+        "snow" => "snow",
+        "rain-showers" => "rain-showers",
+        "snow-showers" => "snow-showers",
+        "thunder" => "thunder",
+        "clear-night" => "clear-night",
+        "mainly-clear-night" => "mainly-clear-night",
+        "partly-cloudy-night" => "partly-cloudy-night",
+        _ => "unknown",
+    }
+}
+
 /// Freedesktop icon name for a Coldfront icon id. COSMIC falls back if the
 /// name is missing from the icon theme; the text label still shows.
 #[must_use]
 pub fn symbolic_icon(icon: &str) -> &'static str {
     match icon {
         "clear" | "mainly-clear" => "weather-clear-symbolic",
+        "clear-night" | "mainly-clear-night" => "weather-clear-night-symbolic",
         "partly-cloudy" => "weather-few-clouds-symbolic",
+        "partly-cloudy-night" => "weather-few-clouds-night-symbolic",
         "overcast" => "weather-overcast-symbolic",
         "fog" => "weather-fog-symbolic",
         "snow" | "snow-showers" => "weather-snow-symbolic",

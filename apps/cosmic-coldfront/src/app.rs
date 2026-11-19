@@ -181,9 +181,12 @@ impl cosmic::Application for AppModel {
     }
 
     fn init(
-        core: cosmic::Core,
+        mut core: cosmic::Core,
         _flags: Self::Flags,
     ) -> (Self, Task<cosmic::Action<Self::Message>>) {
+        // Frosted applet colors are translucent. An empty blur set keeps the
+        // opaque palette so the popup does not show the panel through it.
+        core.set_auto_blur(Default::default());
         let config = config::load();
         let active_tab = PopupTab::Current;
         let app = Self {

@@ -17,10 +17,16 @@ From the repository root, with COSMIC build libraries installed:
 ```bash
 just applet build-release
 just applet run
-just applet install
 ```
 
-`just applet install` writes `/usr/bin/cosmic-coldfront` plus the desktop file, metainfo, and icon. Full steps are in [CONTRIBUTING.md](../../CONTRIBUTING.md).
+Install and uninstall write under `/usr`. Build as yourself, then copy or remove the files without a root rebuild:
+
+```bash
+sudo just --justfile apps/cosmic-coldfront/justfile --no-deps install
+sudo just --justfile apps/cosmic-coldfront/justfile --no-deps uninstall
+```
+
+`install` writes `/usr/bin/cosmic-coldfront` plus the desktop file, metainfo, and icon. Full steps are in [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
 ## Credits
 

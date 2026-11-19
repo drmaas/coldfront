@@ -136,13 +136,37 @@ pub fn popup(app: &AppModel) -> Element<'_, Message> {
             spacing.space_l,
         ])
         .width(Length::Fixed(app.popup_width()))
-        .height(Length::Fixed(app.popup_height()));
+        .height(Length::Fixed(app.popup_height()))
+        .style(popup_fill);
 
     app.core
         .applet
         .popup_container(body)
         .limits(app.popup_container_limits())
         .into()
+}
+
+/// Solid popup fill. `popup_container` follows `theme.transparent`, which is
+/// the frosted applet color and lets the panel show through.
+fn popup_fill(theme: &cosmic::Theme) -> cosmic::widget::container::Style {
+    let cosmic = theme.cosmic();
+    let surface = cosmic.background(false);
+    let mut fill = Color::from(surface.base);
+    fill.a = 1.0;
+    let mut edge = Color::from(surface.divider);
+    edge.a = 1.0;
+    cosmic::widget::container::Style {
+        text_color: Some(surface.on.into()),
+        background: Some(fill.into()),
+        border: cosmic::iced::Border {
+            radius: cosmic.corner_radii.radius_m.into(),
+            width: 1.0,
+            color: edge,
+        },
+        shadow: cosmic::iced::Shadow::default(),
+        icon_color: Some(surface.on.into()),
+        snap: true,
+    }
 }
 
 fn header(app: &AppModel) -> Element<'_, Message> {

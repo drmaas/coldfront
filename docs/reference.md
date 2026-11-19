@@ -19,7 +19,7 @@ Change a shared rule in Rust, in TypeScript, and in `fixtures/contract.json` in 
 | Web Mercator tile math | `lat_lon_to_tile`, `tile_window` | yes |
 | IEM tile URL and radar frame lists | `iem_tile_url`, `web_radar_frames`, `applet_radar_frames` | yes |
 | HTTP to upstream hosts | `HttpClient` or the Worker | no |
-| Painted map | `compose_radar_map` or `RadarMap.tsx` | no |
+| Painted map | `compose_radar_map`, `compose_viewport`, or `RadarMap.tsx` | no |
 | Hourly chart and daily range bar | `chartPoints`, `rangePlacement` | no |
 | Panel icon names | `symbolic_icon` | no |
 
@@ -76,7 +76,7 @@ Rounding is half away from zero. `-1.5` becomes `-2`. Non-finite values become `
 | 95, 96, 99 | Thunderstorm | `thunder` |
 | anything else | Unknown | `unknown` |
 
-Web draws those icon ids as SVG. Applet maps them through `symbolic_icon` to freedesktop names such as `weather-clear-symbolic`. A missing theme icon falls back inside COSMIC. The text label still shows. With no forecast loaded, the panel icon is `weather-clear-symbolic` and the temperature is hidden.
+Web draws those icon ids as SVG. Applet maps them through `symbolic_icon` to freedesktop names such as `weather-clear-symbolic`. A missing theme icon falls back inside COSMIC. The text label still shows. After startup, a valid saved ZIP loads the forecast so the panel icon matches the current condition. With no forecast loaded, the panel icon is `weather-clear-symbolic` and the temperature is hidden. Active alerts add `dialog-warning-symbolic` beside the weather icon.
 
 ## Worker API
 
@@ -128,11 +128,13 @@ Until the first frame draws radar pixels, the card says "Loading radar…". If t
 
 ### Applet
 
-`compose_radar_map` paints a pale background (`213, 227, 236`), blits basemap tiles, then blits radar tiles. Missing tiles leave that background or stay transparent. It crops a 512 by 340 region around the pin, resizes to 400 by 260 with a triangle filter, and draws the pin. The popup image widget shows that raster at a height of 240 px.
+The Radar tab uses `map_viewport` and `compose_viewport`. The camera starts at zoom 7 with zero pan. Zoom stays from 5 to 11. Drag pans. Mouse wheel zooms. Trackpad pixel scroll pans; Ctrl plus scroll zooms. Zoom in/out and recenter buttons sit under the map. View size is 800 by 480. Tiles are cached by source, zoom, and coordinates. Every pan/zoom recomposites basemap and radar together from whatever tiles are already cached (missing cells stay holes), matching the web canvas paint path. A 50 ms settle debounce fetches newly visible edge tiles for the shown frame and every frame already ready, without blanking the map. Failed tile fetches stay absent so the next settle can retry. Stale fetch tasks still merge successful tiles into the cache.
 
-Frame offsets are 50, 40, 30, 20, 10, and 0 minutes. The latest frame is requested before the older ones so the popup can show a picture before the loop is full. If a composite exists but every radar tile was missing, the popup says the radar tiles are missing.
+`compose_radar_map` still paints a pale background (`213, 227, 236`), blits basemap and radar tiles, crops around the pin, and resizes to 400 by 260. That path stays for unit and contract tests. The interactive tab does not use it.
 
-The radar loop runs only while the popup is open, playback is on, and at least two frames are stored. Interval is 800 ms. Playback defaults to on.
+Frame offsets are 50, 40, 30, 20, 10, and 0 minutes. The latest frame is requested before the older ones so the tab can show a picture before the loop is full. If a composite exists but every radar tile was missing, the tab says the radar tiles are missing.
+
+The radar loop runs only while the popup is open on the Radar tab, playback is on, and at least two frames are stored. Interval is 800 ms. Playback defaults to on.
 
 `HttpClient` uses rustls, a 12 second timeout, and the Coldfront User-Agent. `get_bytes` maps HTTP 404 to `NotFound` and other non-success statuses to `Upstream`. Error text does not include the URL.
 

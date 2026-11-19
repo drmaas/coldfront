@@ -12,7 +12,9 @@ use image::{Rgba, RgbaImage, imageops};
 pub const IEM_TILE_ORIGIN: &str = "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0";
 pub const MAP_DISPLAY_WIDTH: u32 = 400;
 pub const MAP_DISPLAY_HEIGHT: u32 = 260;
-const TILE_SIZE: u32 = 256;
+pub const APPLET_ZOOM_MIN: u32 = 5;
+pub const APPLET_ZOOM_MAX: u32 = 11;
+pub const TILE_SIZE: u32 = 256;
 
 /// One radar animation frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +53,54 @@ pub struct Raster {
     pub width: u32,
     pub height: u32,
     pub pixels: Vec<u8>,
+}
+
+/// Tile grid and crop for an interactive map view (pan/zoom).
+///
+/// The grid includes a margin of tiles around the visible area so edge tiles
+/// are ready while the user drags. `crop_x`/`crop_y` are the top-left of the
+/// visible view inside that grid, in pixels. The pin is in view pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MapViewport {
+    pub zoom: u32,
+    pub origin_x: u32,
+    pub origin_y: u32,
+    pub span_x: u32,
+    pub span_y: u32,
+    pub crop_x: u32,
+    pub crop_y: u32,
+    pub view_width: u32,
+    pub view_height: u32,
+    pub pin_x: i32,
+    pub pin_y: i32,
+}
+
+impl MapViewport {
+    /// Convert to a [`TileWindow`] for loaders that still take that type.
+    #[must_use]
+    pub fn as_tile_window(&self) -> TileWindow {
+        TileWindow {
+            zoom: self.zoom,
+            origin_x: self.origin_x,
+            origin_y: self.origin_y,
+            span_x: self.span_x,
+            span_y: self.span_y,
+            pin_x: 0,
+            pin_y: 0,
+        }
+    }
+
+    /// Absolute tile coordinates in row-major order matching a tile slice.
+    #[must_use]
+    pub fn tile_coords(&self) -> Vec<(u32, u32)> {
+        let mut coords = Vec::with_capacity((self.span_x * self.span_y) as usize);
+        for row in 0..self.span_y {
+            for col in 0..self.span_x {
+                coords.push((self.origin_x + col, self.origin_y + row));
+            }
+        }
+        coords
+    }
 }
 
 /// Twelve frames, every five minutes from 55 minutes ago through the latest scan.
@@ -125,6 +175,112 @@ pub fn tile_window(
         pin_x,
         pin_y,
     }
+}
+
+/// Center, zoom, pan, and size for [`map_viewport`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MapCamera {
+    pub latitude: f64,
+    pub longitude: f64,
+    pub zoom: u32,
+    pub pan_x: f64,
+    pub pan_y: f64,
+    pub view_width: u32,
+    pub view_height: u32,
+    pub margin: u32,
+}
+
+/// Tile grid covering a panned/zoomed view, with a one-tile margin by default.
+///
+/// `pan_x`/`pan_y` are screen pixels: positive values move the map content
+/// right/down, matching the web `RadarMap` canvas.
+#[must_use]
+pub fn map_viewport(camera: MapCamera) -> MapViewport {
+    let zoom = camera.zoom.clamp(APPLET_ZOOM_MIN, APPLET_ZOOM_MAX);
+    let view_width = camera.view_width.max(1);
+    let view_height = camera.view_height.max(1);
+    let (cx, cy) = world(camera.latitude, camera.longitude, zoom);
+    let left = cx
+        - f64::from(view_width) / 2.0 / f64::from(TILE_SIZE)
+        - camera.pan_x / f64::from(TILE_SIZE);
+    let top = cy
+        - f64::from(view_height) / 2.0 / f64::from(TILE_SIZE)
+        - camera.pan_y / f64::from(TILE_SIZE);
+    let limit = 1u32 << zoom;
+    let margin = camera.margin as i32;
+    let x0 = (left.floor() as i32 - margin).max(0) as u32;
+    let y0 = (top.floor() as i32 - margin).max(0) as u32;
+    let x1 = ((left + f64::from(view_width) / f64::from(TILE_SIZE)).floor() as i32 + margin)
+        .clamp(0, limit.saturating_sub(1) as i32) as u32;
+    let y1 = ((top + f64::from(view_height) / f64::from(TILE_SIZE)).floor() as i32 + margin)
+        .clamp(0, limit.saturating_sub(1) as i32) as u32;
+    let origin_x = x0.min(limit.saturating_sub(1));
+    let origin_y = y0.min(limit.saturating_sub(1));
+    let span_x = x1.saturating_sub(origin_x).saturating_add(1).max(1);
+    let span_y = y1.saturating_sub(origin_y).saturating_add(1).max(1);
+    let crop_x = round_half_away_from_zero((left - f64::from(origin_x)) * f64::from(TILE_SIZE))
+        .max(0) as u32;
+    let crop_y =
+        round_half_away_from_zero((top - f64::from(origin_y)) * f64::from(TILE_SIZE)).max(0) as u32;
+    let pin_x = round_half_away_from_zero(f64::from(view_width) / 2.0 + camera.pan_x);
+    let pin_y = round_half_away_from_zero(f64::from(view_height) / 2.0 + camera.pan_y);
+    MapViewport {
+        zoom,
+        origin_x,
+        origin_y,
+        span_x,
+        span_y,
+        crop_x,
+        crop_y,
+        view_width,
+        view_height,
+        pin_x,
+        pin_y,
+    }
+}
+
+/// Stack basemap and radar tiles for an interactive viewport and draw the pin.
+///
+/// Missing tiles leave the pale background (basemap) or stay transparent (radar).
+/// Output size matches `viewport.view_width` by `viewport.view_height`.
+pub fn compose_viewport(
+    viewport: &MapViewport,
+    basemap: &[Option<Vec<u8>>],
+    radar: &[Option<Vec<u8>>],
+) -> Result<Raster, Error> {
+    let grid = viewport.as_tile_window();
+    let width = grid.span_x.saturating_mul(TILE_SIZE);
+    let height = grid.span_y.saturating_mul(TILE_SIZE);
+    if width == 0 || height == 0 || viewport.view_width == 0 || viewport.view_height == 0 {
+        return Err(Error::Parse("map viewport is empty".into()));
+    }
+    let mut image = RgbaImage::from_pixel(width, height, Rgba([213, 227, 236, 255]));
+    blit_tiles(&mut image, &grid, basemap);
+    blit_tiles(&mut image, &grid, radar);
+
+    let crop_w = viewport.view_width.min(width);
+    let crop_h = viewport.view_height.min(height);
+    let max_left = width.saturating_sub(crop_w);
+    let max_top = height.saturating_sub(crop_h);
+    let left = viewport.crop_x.min(max_left);
+    let top = viewport.crop_y.min(max_top);
+    let cropped = imageops::crop(&mut image, left, top, crop_w, crop_h).to_image();
+    let mut output = if crop_w == viewport.view_width && crop_h == viewport.view_height {
+        cropped
+    } else {
+        imageops::resize(
+            &cropped,
+            viewport.view_width,
+            viewport.view_height,
+            imageops::FilterType::Triangle,
+        )
+    };
+    draw_pin(&mut output, viewport.pin_x, viewport.pin_y);
+    Ok(Raster {
+        width: output.width(),
+        height: output.height(),
+        pixels: output.into_raw(),
+    })
 }
 
 /// Stack basemap tiles, radar tiles, crop around the pin, and draw the pin.
@@ -258,7 +414,10 @@ fn draw_disc(image: &mut RgbaImage, cx: i32, cy: i32, radius: i32, color: Rgba<u
 
 #[cfg(test)]
 mod tests {
-    use super::{MAP_DISPLAY_HEIGHT, MAP_DISPLAY_WIDTH, TileWindow, compose_radar_map};
+    use super::{
+        APPLET_ZOOM_MAX, APPLET_ZOOM_MIN, MAP_DISPLAY_HEIGHT, MAP_DISPLAY_WIDTH, MapCamera,
+        TileWindow, compose_radar_map, compose_viewport, map_viewport,
+    };
     use image::{ExtendedColorType, ImageEncoder, Rgba, RgbaImage, codecs::png::PngEncoder};
 
     #[test]
@@ -285,6 +444,111 @@ mod tests {
         assert!(head[2] < 120, "pin blue channel {}", head[2]);
         let corner = pixel(&raster.pixels, raster.width, 4, 4);
         assert!(corner[2] > 150, "basemap blue channel {}", corner[2]);
+    }
+
+    #[test]
+    fn map_viewport_centers_pin_with_zero_pan() {
+        let view = map_viewport(MapCamera {
+            latitude: 41.6,
+            longitude: -93.6,
+            zoom: 7,
+            pan_x: 0.0,
+            pan_y: 0.0,
+            view_width: 880,
+            view_height: 520,
+            margin: 1,
+        });
+        assert_eq!(view.zoom, 7);
+        assert_eq!(view.view_width, 880);
+        assert_eq!(view.view_height, 520);
+        assert_eq!(view.pin_x, 440);
+        assert_eq!(view.pin_y, 260);
+        assert!(view.span_x >= 3);
+        assert!(view.span_y >= 3);
+        assert_eq!(
+            view.tile_coords().len(),
+            (view.span_x * view.span_y) as usize
+        );
+    }
+
+    #[test]
+    fn map_viewport_pan_moves_pin() {
+        let view = map_viewport(MapCamera {
+            latitude: 41.6,
+            longitude: -93.6,
+            zoom: 7,
+            pan_x: 40.0,
+            pan_y: -20.0,
+            view_width: 400,
+            view_height: 300,
+            margin: 1,
+        });
+        assert_eq!(view.pin_x, 240);
+        assert_eq!(view.pin_y, 130);
+    }
+
+    #[test]
+    fn map_viewport_clamps_zoom() {
+        assert_eq!(
+            map_viewport(MapCamera {
+                latitude: 0.0,
+                longitude: 0.0,
+                zoom: 1,
+                pan_x: 0.0,
+                pan_y: 0.0,
+                view_width: 100,
+                view_height: 100,
+                margin: 0,
+            })
+            .zoom,
+            APPLET_ZOOM_MIN
+        );
+        assert_eq!(
+            map_viewport(MapCamera {
+                latitude: 0.0,
+                longitude: 0.0,
+                zoom: 20,
+                pan_x: 0.0,
+                pan_y: 0.0,
+                view_width: 100,
+                view_height: 100,
+                margin: 0,
+            })
+            .zoom,
+            APPLET_ZOOM_MAX
+        );
+    }
+
+    #[test]
+    fn compose_viewport_matches_view_size_and_draws_pin() {
+        let tile = RgbaImage::from_pixel(256, 256, Rgba([10, 20, 200, 255]));
+        let mut bytes = Vec::new();
+        PngEncoder::new(&mut bytes)
+            .write_image(tile.as_raw(), 256, 256, ExtendedColorType::Rgba8)
+            .expect("png");
+        let view = map_viewport(MapCamera {
+            latitude: 0.0,
+            longitude: 0.0,
+            zoom: 5,
+            pan_x: 0.0,
+            pan_y: 0.0,
+            view_width: 200,
+            view_height: 150,
+            margin: 0,
+        });
+        let tiles: Vec<Option<Vec<u8>>> = (0..(view.span_x * view.span_y))
+            .map(|_| Some(bytes.clone()))
+            .collect();
+        let raster = compose_viewport(&view, &tiles, &vec![None; tiles.len()]).expect("compose");
+        assert_eq!(raster.width, 200);
+        assert_eq!(raster.height, 150);
+        let pin = pixel(
+            &raster.pixels,
+            raster.width,
+            view.pin_x.clamp(0, 199) as u32,
+            (view.pin_y - 8).clamp(0, 149) as u32,
+        );
+        assert!(pin[0] > 180, "pin red channel {}", pin[0]);
     }
 
     fn pixel(pixels: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {

@@ -14,14 +14,15 @@ Do not call the web Worker from the applet.
 
 ## Rules
 
-- Keep popup order: summary, radar, current facts, alerts, settings. Do not put the radar behind a tab or a button.
-- `init` must not fetch. Fetch on popup open only when `forecast` is missing or `frames` is empty.
-- Call `HttpClient` for ZIP, forecast, and alerts. Call `mapload` for tiles. Call `compose_radar_map` to build the image.
-- Load the latest radar frame (offset 0) before older frames. Offsets stay 50, 40, 30, 20, 10, 0. Zoom stays 7. The grid stays 3 by 3.
-- Ignore `WeatherReady`, `OlderFrame`, and `FrameSkipped` when `generation` does not match.
-- A failed alert request becomes an empty list. Do not fail the forecast for that.
+- Popup tabs are Current, Radar, Hourly, and 10-day. Settings and Alerts open from the header gear and alert button (not tab-bar segments). Radar is a tab, not stacked above the facts.
+- `init` must not fetch. After startup, a valid saved ZIP loads place, forecast, and alerts so the panel icon matches. Radar tiles load only when the Radar tab is open (or was opened and needs a reload).
+- Call `HttpClient` for ZIP, forecast, and alerts. Call `mapload` for tiles. Call `compose_viewport` for the interactive Radar tab.
+- Load the latest radar frame (offset 0) before older frames. Offsets stay 50, 40, 30, 20, 10, 0. Interactive zoom is 5–11. Playback is 800 ms while the popup is open on the Radar tab with at least two frames.
+- Pan/zoom always recomposites basemap + radar from the tile cache (holes for missing tiles). Prefetch edge tiles while dragging; settle without blanking the map.
+- Ignore applying `WeatherReady`, `MapReady`, `OlderFrame`, and `FrameSkipped` when `generation` / `map_generation` does not match. Stale `MapReady` / `OlderFrame` still merge successful tiles into the cache.
+- A failed alert request becomes an empty list. Do not fail the forecast for that. A failed weather refresh keeps the last forecast and sets `refresh_failed`.
 - Do not refetch when the user switches °F and °C.
-- Refetch when the saved ZIP changes, the MapTiler key changes, or the OSM toggle changes while the popup is open.
+- Refetch weather when the saved ZIP changes. Reload the map when the MapTiler key or OSM toggle changes after the Radar tab has been opened.
 - Basemap order is environment `MAPTILER_API_KEY`, then the saved key, then OSM if `allow_osm_basemap` is true, otherwise none.
 - Do not turn OSM on by default. Do not log tile URLs.
 - `Config` is cosmic-config version 1. A new field or a new meaning requires a new `#[version]`.
@@ -44,7 +45,7 @@ cargo test -p coldfront-core -p cosmic-coldfront --locked
 ## Failures
 
 - Invalid ZIP: set `map_error` from `Error::InvalidZip` and do not call the network.
-- ZIP or forecast failure: `WeatherFailed` with that generation. Leave the previous frames cleared.
+- ZIP or forecast failure with no prior forecast: `WeatherFailed` with that generation. Leave the previous frames cleared when the ZIP changed.
 - Older-frame failure: `FrameSkipped`, then load the next offset.
 - `HttpClient` errors must keep omitting the request URL.
 

@@ -49,7 +49,7 @@ A parsed forecast has one `Current`, hourly rows, and daily rows. The contract s
 
 Zippopotam `/us/{zip}` supplies `post code`, and the first `places` entry supplies `place name`, `state`, `state abbreviation`, `latitude`, and `longitude`.
 
-NWS `/alerts/active?point={latitude},{longitude}` is a FeatureCollection. Each feature with a non-empty `properties.event` becomes an `Alert`. Empty events are dropped. Page and popup render at most three alerts, event plus headline.
+NWS `/alerts/active?point={latitude},{longitude}` is a FeatureCollection. Each feature with a non-empty `properties.event` becomes an `Alert`. Empty events are dropped. Page and popup render at most three alerts, event plus headline. An empty list shows "No active alerts" on the web page.
 
 ### Units and weather codes
 

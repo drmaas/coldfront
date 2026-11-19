@@ -51,7 +51,7 @@ flowchart LR
 | `apps/cosmic-coldfront` | COSMIC panel applet. Links `coldfront-core`, talks to upstream hosts itself. No map widget, so it composites raster tiles into one image. |
 | `crates/coldfront-core` | Rust domain crate. Web does not call it. `lib/domain.ts` is the parallel copy. |
 
-Web page: current conditions, next 24 hours, 10-day list, radar, up to three alerts. Applet popup: tabbed Current, Radar, Hourly, and 10-day views, with Settings and Alerts from the header. Up to three alerts show in the Alerts view.
+Web page: current conditions, next 24 hours, 10-day list, radar, up to three alerts, or "No active alerts" when the list is empty. Applet popup: tabbed Current, Radar, Hourly, and 10-day views, with Settings and Alerts from the header. Up to three alerts show in the Alerts view.
 
 ## Shared rules
 

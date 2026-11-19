@@ -1039,8 +1039,10 @@ impl AppModel {
 
     pub(crate) fn panel_temperature(&self) -> Option<String> {
         let forecast = self.forecast.as_ref()?;
-        let value = display_temperature(forecast.current.temperature_c, self.config.fahrenheit);
-        Some(format!("{value}°"))
+        Some(format_panel_temperature(
+            forecast.current.temperature_c,
+            self.config.fahrenheit,
+        ))
     }
 
     pub(crate) fn unit_suffix(&self) -> &'static str {
@@ -1124,6 +1126,12 @@ fn build_tab_model(active: PopupTab) -> segmented_button::SingleSelectModel {
     model
 }
 
+pub(crate) fn format_panel_temperature(celsius: f64, fahrenheit: bool) -> String {
+    let value = display_temperature(celsius, fahrenheit);
+    let unit = if fahrenheit { "F" } else { "C" };
+    format!("{value}°{unit}")
+}
+
 fn build_tab_model_none() -> segmented_button::SingleSelectModel {
     let mut model = segmented_button::SingleSelectModel::default();
     for (tab, label) in [
@@ -1164,5 +1172,17 @@ pub(crate) fn basemap_kind(config: &Config) -> BasemapKind {
         BasemapKind::Osm
     } else {
         BasemapKind::None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_panel_temperature;
+
+    #[test]
+    fn panel_temperature_includes_unit() {
+        assert_eq!(format_panel_temperature(11.666_666_666_7, true), "53°F");
+        assert_eq!(format_panel_temperature(12.4, false), "12°C");
+        assert_eq!(format_panel_temperature(-1.5, false), "-2°C");
     }
 }

@@ -28,16 +28,12 @@ const RANGE_COOL: Color = Color::from_rgb(0.490, 0.827, 0.988);
 const RANGE_WARM: Color = Color::from_rgb(0.961, 0.620, 0.043);
 
 pub fn panel(app: &AppModel) -> Element<'_, Message> {
-    let spacing = cosmic::theme::spacing();
+    let is_horizontal = app.core.applet.is_horizontal();
+    let suggested_size = app.core.applet.suggested_size(true);
+    let applet_padding = app.core.applet.suggested_padding(true);
     // Cosmic symbolic SVGs sit flush to the viewBox; inset so AppletIcon
     // focus/hover chrome does not clip the glyph.
-    let icon_size = app
-        .core
-        .applet
-        .suggested_size(true)
-        .0
-        .saturating_sub(2)
-        .max(12);
+    let icon_size = suggested_size.0.saturating_sub(2).max(12);
 
     let mut children: Vec<Element<'_, Message>> = Vec::new();
     if !app.alerts.is_empty() {
@@ -55,34 +51,48 @@ pub fn panel(app: &AppModel) -> Element<'_, Message> {
             .into(),
     );
     if let Some(temp) = app.panel_temperature() {
-        children.push(app.core.applet.text(temp).into());
+        children.push(
+            app.core
+                .applet
+                .text(temp)
+                .height(Length::Fixed(f32::from(suggested_size.1)))
+                .align_y(Alignment::Center)
+                .into(),
+        );
     }
 
-    let readout: Element<'_, Message> = if app.core.applet.is_horizontal() {
+    let readout: Element<'_, Message> = if is_horizontal {
         widget::Row::with_children(children)
             .align_y(Alignment::Center)
-            .spacing(spacing.space_xxs)
+            .spacing(applet_padding.1)
             .into()
     } else {
         widget::Column::with_children(children)
             .align_x(Alignment::Center)
-            .spacing(spacing.space_xxs)
+            .spacing(applet_padding.1)
             .into()
     };
 
+    let (horizontal_padding, vertical_padding) = if is_horizontal {
+        (applet_padding.0, applet_padding.1)
+    } else {
+        (applet_padding.1, applet_padding.0)
+    };
     let button = widget::button::custom(readout)
         .class(cosmic::theme::Button::AppletIcon)
+        .padding([vertical_padding, horizontal_padding])
         .on_press(Message::TogglePopup);
-    let sized = widget::autosize::autosize(button, widget::Id::unique());
+    // Stable autosize id lets the panel grow past the icon slot so the
+    // temperature stays visible. A fresh id each frame keeps the square.
     app.core
         .applet
-        .applet_tooltip(
-            sized,
+        .autosize_window(app.core.applet.applet_tooltip(
+            button,
             app.tooltip(),
             app.popup.is_some(),
             Message::Surface,
             app.core.main_window_id(),
-        )
+        ))
         .into()
 }
 

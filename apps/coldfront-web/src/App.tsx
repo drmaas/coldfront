@@ -238,7 +238,9 @@ function ForecastBody({ data, units }: { data: ForecastData; units: Units }) {
           <li>Humidity {current.humidity}%</li>
         </ul>
         <p className="as-of">As of {formatAsOf(current.time)}</p>
-        {data.alerts.length > 0 && (
+        {data.alerts.length === 0 ? (
+          <p className="alerts-empty">No active alerts</p>
+        ) : (
           <ul className="alerts">
             {data.alerts.slice(0, 3).map((alert) => (
               <li key={alert.id || alert.headline}>

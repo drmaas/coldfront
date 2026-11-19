@@ -24,7 +24,7 @@ Do not add applet UI here. Do not call `coldfront-core` from this package. Keep 
 - `chartPoints` and `rangePlacement` are web-only. Do not port them to Rust unless the applet draws those charts.
 - Unit changes read `localStorage` key `coldfront-units`. Do not refetch on °F / °C.
 - Theme preference reads `localStorage` key `coldfront-theme` (`light` | `dark` | `system`). Resolve `system` with `prefers-color-scheme` and set `data-theme` on `document.documentElement` to `light` or `dark` only.
-- Show at most three alerts.
+- Show at most three alerts. An empty list shows "No active alerts".
 - Radar stays a 2D canvas. Zoom stays from 5 to 11. The loop stays twelve frames at 750 ms.
 - After a binding change, run `pnpm exec wrangler types --include-runtime false` and commit `worker-configuration.d.ts`.
 - Keep `pnpm-workspace.yaml` `allowBuilds` for `esbuild` and `workerd`. pnpm 12 blocks those install scripts otherwise.

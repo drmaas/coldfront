@@ -342,7 +342,7 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
         </button>
       </div>
       <p className="radar-caption">
-        {frame.label} · Base reflectivity, NOAA NEXRAD
+        {frame.label} · MRMS hybrid-scan reflectivity
         {relief ? " · Relief" : ""}
       </p>
       <p className="radar-note">

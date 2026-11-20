@@ -6,10 +6,10 @@ use std::fs;
 use std::path::PathBuf;
 
 use coldfront_core::{
-    applet_radar_frames, chart_points, day_label, describe, display_icon, display_temperature,
+    applet_radar_frames_at, chart_points, day_label, describe, display_icon, display_temperature,
     display_wind_mph, format_as_of, hour_label, iem_tile_url, is_us_zip, lat_lon_to_tile,
     next_hours, parse_alerts, parse_open_meteo, parse_zippopotam, range_placement,
-    round_half_away_from_zero, tile_window, web_radar_frames,
+    round_half_away_from_zero, tile_window, web_radar_frames_at,
 };
 use serde_json::Value;
 
@@ -268,7 +268,7 @@ fn radar_tiles_and_frames_match_the_contract() {
     assert_eq!(point.pixel_x, tile["pixel_x"].as_u64().unwrap() as u32);
     assert_eq!(point.pixel_y, tile["pixel_y"].as_u64().unwrap() as u32);
     assert_eq!(
-        iem_tile_url("nexrad-n0q-900913", point.zoom, point.x, point.y),
+        iem_tile_url("q2-hsr-900913", point.zoom, point.x, point.y),
         tile["url"].as_str().unwrap()
     );
 
@@ -285,7 +285,12 @@ fn radar_tiles_and_frames_match_the_contract() {
     assert_eq!(grid.pin_x, window["pin_x"].as_u64().unwrap() as u32);
     assert_eq!(grid.pin_y, window["pin_y"].as_u64().unwrap() as u32);
 
-    let web = web_radar_frames();
+    let now: jiff::Timestamp = contract["radar_now"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .expect("radar_now");
+    let web = web_radar_frames_at(now);
     assert_eq!(web.len(), contract["web_frames"].as_u64().unwrap() as usize);
     assert_eq!(
         web[0].offset_minutes,
@@ -307,7 +312,7 @@ fn radar_tiles_and_frames_match_the_contract() {
     assert_eq!(last.layer, contract["web_last"]["layer"].as_str().unwrap());
     assert_eq!(last.label, contract["web_last"]["label"].as_str().unwrap());
 
-    let applet = applet_radar_frames();
+    let applet = applet_radar_frames_at(now);
     assert_eq!(
         applet.len(),
         contract["applet_frames"].as_u64().unwrap() as usize

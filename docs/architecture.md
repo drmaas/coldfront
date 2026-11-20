@@ -2,7 +2,7 @@
 
 Design record for Coldfront. If this file and the code disagree, fix the code or update this file in the same change. Setup and release live in [CONTRIBUTING.md](../CONTRIBUTING.md). Dense tables (Open-Meteo fields, WMO codes, Worker routes, radar frames) live in [reference.md](reference.md).
 
-Coldfront is two clients and no shared backend. A person enters a US ZIP code. Each client resolves that ZIP, loads a forecast and active alerts, and draws NEXRAD radar. Neither client has accounts, stores a forecast on a server, or calls the other client.
+Coldfront is two clients and no shared backend. A person enters a US ZIP code. Each client resolves that ZIP, loads a forecast and active alerts, and draws MRMS radar. Neither client has accounts, stores a forecast on a server, or calls the other client.
 
 ```mermaid
 flowchart LR
@@ -21,7 +21,7 @@ flowchart LR
   OM["Open-Meteo"]
   NWS["api.weather.gov"]
   MT["MapTiler"]
-  IEM["IEM NEXRAD tiles"]
+  IEM["IEM MRMS radar tiles"]
 
   Web --> DomainTS
   Applet --> Core
@@ -130,7 +130,7 @@ Config version 1: `zip`, `fahrenheit` (default true), `maptiler_api_key`, `allow
 
 ## Radar and basemap
 
-Both clients draw IEM NEXRAD tiles. Web uses a 2D canvas by default (zoom 5–11, twelve frames at 750 ms). When WebGL2 is available, a Relief toggle rebuilds those same frames as a heightfield on a basemap (or plain) board with a slow sweep — same pan, zoom, and fullscreen as Flat; Shift-drag or right-drag orbits. The Flat radar picture is not drawn under the mesh. Missing WebGL2 leaves the toggle off. Applet Radar tab composites into a viewport that matches the map widget (about 400×220 when compact; larger when expanded), with zoom 5–11, pan/zoom gestures, offsets 50…0, and an 800 ms loop while the Radar tab is open. Zoom and expand controls overlay the map, inset from the top-right; the frame slider stays below. `compose_radar_map` (400×260) remains for contract tests. Frame lists and layer names: [Radar](reference.md#radar).
+Both clients draw IEM MRMS hybrid-scan reflectivity tiles (`q2-hsr` / `mrms::lcref`). Web uses a 2D canvas by default (zoom 5–11, twelve frames at 750 ms). When WebGL2 is available, a Relief toggle rebuilds those same frames as a heightfield on a basemap (or plain) board — same pan, zoom, and fullscreen as Flat; Shift-drag or right-drag orbits. The Flat radar picture is not drawn under the mesh. Missing WebGL2 leaves the toggle off. Applet Radar tab composites into a viewport that matches the map widget (about 400×220 when compact; larger when expanded), with zoom 5–11, pan/zoom gestures, offsets 50…0, and an 800 ms loop while the Radar tab is open. Zoom and expand controls overlay the map, inset from the top-right; the frame slider stays below. `compose_radar_map` (400×260) remains for contract tests. Frame lists and layer names: [Radar](reference.md#radar).
 
 ```mermaid
 flowchart TD

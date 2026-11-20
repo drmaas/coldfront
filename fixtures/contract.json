@@ -88,7 +88,7 @@
     "y": 46,
     "pixel_x": 244,
     "pixel_y": 2,
-    "url": "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/7/30/46.png"
+    "url": "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/q2-hsr-900913/7/30/46.png"
   },
   "window": {
     "zoom": 7,
@@ -98,15 +98,16 @@
     "pin_x": 500,
     "pin_y": 258
   },
+  "radar_now": "2026-11-20T05:10:00Z",
   "web_frames": 12,
   "web_first": {
     "offset_minutes": 55,
-    "layer": "nexrad-n0q-900913-m55m",
+    "layer": "mrms::lcref-202611200414",
     "label": "55 min ago"
   },
   "web_last": {
     "offset_minutes": 0,
-    "layer": "nexrad-n0q-900913",
+    "layer": "q2-hsr-900913",
     "label": "Latest scan"
   },
   "applet_frames": 6,

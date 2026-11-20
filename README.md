@@ -27,7 +27,7 @@ Forecasts are requested in Celsius and km/h. The app converts them for display. 
 | [Zippopotam.us](https://api.zippopotam.us) | ZIP code to city and coordinates | none |
 | [Open-Meteo](https://open-meteo.com/) | Current, hourly, and daily forecast | none |
 | [api.weather.gov](https://www.weather.gov/documentation/services-web-api) | Active alerts | none; a User-Agent is required |
-| [Iowa Environmental Mesonet](https://mesonet.agron.iastate.edu/GIS/ridge.phtml) | NEXRAD base-reflectivity tiles | none |
+| [Iowa Environmental Mesonet](https://mesonet.agron.iastate.edu/GIS/ridge.phtml) | MRMS hybrid-scan reflectivity tiles | none |
 | [MapTiler](https://www.maptiler.com/) | Optional street basemap | optional API key |
 
 Every upstream request from Coldfront sends `Coldfront/0.1 (https://github.com/drmaas/coldfront)`.

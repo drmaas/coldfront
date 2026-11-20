@@ -27,8 +27,9 @@ pub use place::{Place, parse_zippopotam};
 pub use radar::{
     APPLET_ZOOM_MAX, APPLET_ZOOM_MIN, IEM_TILE_ORIGIN, MAP_DISPLAY_HEIGHT, MAP_DISPLAY_WIDTH,
     MapCamera, MapViewport, RadarFrame, Raster, TILE_SIZE, TilePoint, TileWindow,
-    applet_radar_frames, compose_radar_map, compose_viewport, iem_tile_url, lat_lon_to_tile,
-    map_viewport, maptiler_tile_url, osm_tile_url, tile_window, web_radar_frames,
+    applet_radar_frames, applet_radar_frames_at, compose_radar_map, compose_viewport, iem_tile_url,
+    lat_lon_to_tile, map_viewport, maptiler_tile_url, osm_tile_url, radar_layer, tile_window,
+    web_radar_frames, web_radar_frames_at,
 };
 pub use units::{
     celsius_to_fahrenheit, display_temperature, display_wind_mph, kmh_to_mph,

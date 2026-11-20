@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Fetch basemap and NEXRAD tiles and composite them into one image.
+//! Fetch basemap and MRMS radar tiles and composite them into one image.
 //!
 //! Tiles are cached by source, zoom, and coordinates so pan/zoom can recompose
 //! without refetching. Radar frames load only when the Radar tab needs them.

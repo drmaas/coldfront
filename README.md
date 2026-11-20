@@ -1,6 +1,6 @@
 # coldfront
 
-<img src="apps/cosmic-coldfront/resources/icons/hicolor/scalable/apps/io.github.drmaas.CosmicColdfront.svg" alt="Coldfront applet icon" width="128" />
+![Coldfront](images/readme-icon.svg)
 
 Coldfront shows US weather for a ZIP code. The license is GPL-3.0-only.
 

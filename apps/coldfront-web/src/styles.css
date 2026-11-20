@@ -175,6 +175,7 @@ a { color: inherit; text-decoration: none; }
 .radar-relief {
   z-index: 1;
   cursor: grab;
+  touch-action: none;
 }
 .radar-relief:active { cursor: grabbing; }
 .radar-relief-empty {

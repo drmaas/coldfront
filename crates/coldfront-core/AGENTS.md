@@ -16,7 +16,7 @@ Do not put COSMIC widgets, Fluent strings, or Worker routes in this crate. The a
 - `round_half_away_from_zero` is half away from zero. Non-finite input returns `0`.
 - `is_us_zip` accepts only five ASCII digits.
 - Open-Meteo query parameters in `HttpClient::forecast` must match `OPEN_METEO` in `apps/coldfront-web/lib/server/proxy.ts`.
-- `web_radar_frames` is twelve frames, every five minutes, from 55 through 0. `applet_radar_frames` is offsets 50, 40, 30, 20, 10, 0. Layer names stay `nexrad-n0q-900913` and `nexrad-n0q-900913-m{mm}m`.
+- `web_radar_frames` is twelve frames, every five minutes, from 55 through 0. `applet_radar_frames` is offsets 50, 40, 30, 20, 10, 0. Latest layer is `q2-hsr-900913`. Older frames use `mrms::lcref-{YYYYMMDDHHMI}` floored to an even UTC minute from `now - offset`.
 - `compose_radar_map` output stays 400 by 260. Do not call it from web code. The applet Radar tab uses `map_viewport` / `compose_viewport` (zoom 5–11).
 - `get_bytes` must not put the URL in `Error`. A MapTiler key can sit in that URL.
 - `osm_tile_url` is for an explicit applet opt-in. Do not call it from a default path in this crate.

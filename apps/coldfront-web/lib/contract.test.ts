@@ -76,6 +76,7 @@ const contract = fixture("contract.json") as {
   };
   tile: { zoom: number; x: number; y: number; pixel_x: number; pixel_y: number; url: string };
   window: { zoom: number; span: number; origin_x: number; origin_y: number; pin_x: number; pin_y: number };
+  radar_now: string;
   web_frames: number;
   web_first: { offset_minutes: number; layer: string; label: string };
   web_last: { offset_minutes: number; layer: string; label: string };
@@ -192,7 +193,7 @@ describe("shared fixtures", () => {
     expect(point.y).toBe(contract.tile.y);
     expect(point.pixelX).toBe(contract.tile.pixel_x);
     expect(point.pixelY).toBe(contract.tile.pixel_y);
-    expect(iemTileUrl("nexrad-n0q-900913", point.zoom, point.x, point.y)).toBe(contract.tile.url);
+    expect(iemTileUrl("q2-hsr-900913", point.zoom, point.x, point.y)).toBe(contract.tile.url);
     const grid = tileWindow(
       contract.place.latitude,
       contract.place.longitude,
@@ -204,7 +205,8 @@ describe("shared fixtures", () => {
     expect(grid.originY).toBe(contract.window.origin_y);
     expect(grid.pinX).toBe(contract.window.pin_x);
     expect(grid.pinY).toBe(contract.window.pin_y);
-    const web = webRadarFrames();
+    const now = new Date(contract.radar_now);
+    const web = webRadarFrames(now);
     expect(web).toHaveLength(contract.web_frames);
     expect(web[0]).toMatchObject({
       offsetMinutes: contract.web_first.offset_minutes,
@@ -216,7 +218,7 @@ describe("shared fixtures", () => {
       layer: contract.web_last.layer,
       label: contract.web_last.label,
     });
-    const applet = appletRadarFrames();
+    const applet = appletRadarFrames(now);
     expect(applet).toHaveLength(contract.applet_frames);
     expect(applet[0].offsetMinutes).toBe(contract.applet_first_offset);
     expect(applet.at(-1)?.label).toBe("Latest scan");

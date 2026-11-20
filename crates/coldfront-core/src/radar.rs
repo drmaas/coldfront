@@ -8,6 +8,7 @@
 use crate::error::Error;
 use crate::units::round_half_away_from_zero;
 use image::{Rgba, RgbaImage, imageops};
+use jiff::{Timestamp, ToSpan};
 
 pub const IEM_TILE_ORIGIN: &str = "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0";
 pub const MAP_DISPLAY_WIDTH: u32 = 400;
@@ -106,14 +107,51 @@ impl MapViewport {
 /// Twelve frames, every five minutes from 55 minutes ago through the latest scan.
 #[must_use]
 pub fn web_radar_frames() -> Vec<RadarFrame> {
-    (0..=11).rev().map(|step| frame(step * 5)).collect()
+    web_radar_frames_at(Timestamp::now())
+}
+
+/// Same as [`web_radar_frames`], with a fixed `now` for tests.
+#[must_use]
+pub fn web_radar_frames_at(now: Timestamp) -> Vec<RadarFrame> {
+    (0..=11).rev().map(|step| frame(step * 5, now)).collect()
 }
 
 /// Six frames, every ten minutes. Fewer tiles than the web loop, so the popup
 /// can show the latest scan quickly and then animate.
 #[must_use]
 pub fn applet_radar_frames() -> Vec<RadarFrame> {
-    [50, 40, 30, 20, 10, 0].into_iter().map(frame).collect()
+    applet_radar_frames_at(Timestamp::now())
+}
+
+/// Same as [`applet_radar_frames`], with a fixed `now` for tests.
+#[must_use]
+pub fn applet_radar_frames_at(now: Timestamp) -> Vec<RadarFrame> {
+    [50, 40, 30, 20, 10, 0]
+        .into_iter()
+        .map(|offset| frame(offset, now))
+        .collect()
+}
+
+/// IEM tile layer for one animation offset.
+///
+/// Latest uses MRMS hybrid-scan reflectivity (`q2-hsr`), which drops most
+/// ground clutter that NEXRAD base reflectivity keeps. Older frames use the
+/// MRMS SeamlessHSR archive (`mrms::lcref-{UTC}`), floored to an even minute.
+#[must_use]
+pub fn radar_layer(offset_minutes: u32, now: Timestamp) -> String {
+    if offset_minutes == 0 {
+        return "q2-hsr-900913".to_string();
+    }
+    let past = now
+        .checked_sub(i64::from(offset_minutes).minutes())
+        .unwrap_or(now);
+    let secs = past.as_second();
+    let floored = secs - secs.rem_euclid(120);
+    let stamp = Timestamp::from_second(floored)
+        .unwrap_or(past)
+        .strftime("%Y%m%d%H%M")
+        .to_string();
+    format!("mrms::lcref-{stamp}")
 }
 
 #[must_use]
@@ -327,12 +365,7 @@ pub fn compose_radar_map(
     })
 }
 
-fn frame(offset_minutes: u32) -> RadarFrame {
-    let layer = if offset_minutes == 0 {
-        "nexrad-n0q-900913".to_string()
-    } else {
-        format!("nexrad-n0q-900913-m{offset_minutes:02}m")
-    };
+fn frame(offset_minutes: u32, now: Timestamp) -> RadarFrame {
     let label = if offset_minutes == 0 {
         "Latest scan".to_string()
     } else {
@@ -340,7 +373,7 @@ fn frame(offset_minutes: u32) -> RadarFrame {
     };
     RadarFrame {
         offset_minutes,
-        layer,
+        layer: radar_layer(offset_minutes, now),
         label,
     }
 }
@@ -441,9 +474,18 @@ fn draw_disc(image: &mut RgbaImage, cx: i32, cy: i32, radius: i32, color: Rgba<u
 mod tests {
     use super::{
         APPLET_ZOOM_MAX, APPLET_ZOOM_MIN, MAP_DISPLAY_HEIGHT, MAP_DISPLAY_WIDTH, MapCamera,
-        TileWindow, compose_radar_map, compose_viewport, map_viewport,
+        TileWindow, compose_radar_map, compose_viewport, map_viewport, radar_layer,
     };
     use image::{ExtendedColorType, ImageEncoder, Rgba, RgbaImage, codecs::png::PngEncoder};
+    use jiff::Timestamp;
+
+    #[test]
+    fn radar_layer_uses_hsr_latest_and_even_minute_archive() {
+        let now: Timestamp = "2026-11-20T05:10:00Z".parse().expect("now");
+        assert_eq!(radar_layer(0, now), "q2-hsr-900913");
+        assert_eq!(radar_layer(55, now), "mrms::lcref-202611200414");
+        assert_eq!(radar_layer(10, now), "mrms::lcref-202611200500");
+    }
 
     #[test]
     fn compose_draws_a_pin_on_a_solid_basemap() {

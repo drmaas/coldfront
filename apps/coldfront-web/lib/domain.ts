@@ -303,14 +303,28 @@ export function dayLabel(date: string, today: string): string {
   return WEEKDAYS[utc.getUTCDay()];
 }
 
-export function webRadarFrames(): RadarFrame[] {
+export function webRadarFrames(now: Date = new Date()): RadarFrame[] {
   const frames: RadarFrame[] = [];
-  for (let step = 11; step >= 0; step -= 1) frames.push(radarFrame(step * 5));
+  for (let step = 11; step >= 0; step -= 1) frames.push(radarFrame(step * 5, now));
   return frames;
 }
 
-export function appletRadarFrames(): RadarFrame[] {
-  return [50, 40, 30, 20, 10, 0].map(radarFrame);
+export function appletRadarFrames(now: Date = new Date()): RadarFrame[] {
+  return [50, 40, 30, 20, 10, 0].map((offset) => radarFrame(offset, now));
+}
+
+/** IEM tile layer for one animation offset. See Rust `radar_layer`. */
+export function radarLayer(offsetMinutes: number, now: Date = new Date()): string {
+  if (offsetMinutes === 0) return "q2-hsr-900913";
+  const ms = now.getTime() - offsetMinutes * 60_000;
+  const floored = ms - (((ms % 120_000) + 120_000) % 120_000);
+  const stamp = new Date(floored);
+  const y = stamp.getUTCFullYear();
+  const month = String(stamp.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(stamp.getUTCDate()).padStart(2, "0");
+  const hour = String(stamp.getUTCHours()).padStart(2, "0");
+  const minute = String(stamp.getUTCMinutes()).padStart(2, "0");
+  return `mrms::lcref-${y}${month}${day}${hour}${minute}`;
 }
 
 export function iemTileUrl(layer: string, zoom: number, x: number, y: number): string {
@@ -385,10 +399,10 @@ export function rangePlacement(
   return { left, width: Math.max(right - left, high === low ? 2 : 0) };
 }
 
-function radarFrame(offsetMinutes: number): RadarFrame {
+function radarFrame(offsetMinutes: number, now: Date): RadarFrame {
   return {
     offsetMinutes,
-    layer: offsetMinutes === 0 ? "nexrad-n0q-900913" : `nexrad-n0q-900913-m${String(offsetMinutes).padStart(2, "0")}m`,
+    layer: radarLayer(offsetMinutes, now),
     label: offsetMinutes === 0 ? "Latest scan" : `${offsetMinutes} min ago`,
   };
 }

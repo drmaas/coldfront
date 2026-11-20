@@ -19,7 +19,6 @@ const DEFAULT_PITCH = 1.32;
 const MIN_DISTANCE = 1.6;
 const MAX_DISTANCE = 7;
 const MAX_HEIGHT = 0.55;
-const SWEEP_SPEED = 0.4;
 const GROUND_DEPTH = 1.85;
 
 export function RadarRelief({
@@ -75,9 +74,6 @@ export function RadarRelief({
     let lastEchoes: EchoSample[] | null = null;
     let cancelled = false;
     let frame = 0;
-    const start = performance.now();
-    const reduceMotion =
-      typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     const resize = () => {
       const ratio = 2;
@@ -93,7 +89,7 @@ export function RadarRelief({
       gl.viewport(0, 0, canvas.width, canvas.height);
     };
 
-    const draw = (now: number) => {
+    const draw = () => {
       if (cancelled) return;
       resize();
       const aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight);
@@ -104,7 +100,6 @@ export function RadarRelief({
       const view = lookAt(cam.yaw, cam.pitch, cam.distance);
       const projection = orthoForBoard(view, extent, aspect, cam.distance, locked);
       const vp = multiply(projection, view);
-      const sweep = reduceMotion ? 1.1 : ((now - start) / 1000) * SWEEP_SPEED;
       const currentGround = groundRef.current;
       if (currentGround && currentGround !== lastGround) {
         const prevAspect = lastGround && lastGround.height > 0 ? lastGround.width / lastGround.height : 0;
@@ -134,8 +129,6 @@ export function RadarRelief({
       gl.useProgram(program);
       gl.uniformMatrix4fv(locs.uViewProjection, false, vp);
       gl.uniform2f(locs.uExtent, extent.width, extent.depth);
-      gl.uniform1f(locs.uSweep, sweep);
-      gl.uniform1f(locs.uReduceMotion, reduceMotion ? 1 : 0);
       gl.uniform1f(locs.uPresent, locked ? 1 : 0);
       gl.uniform3f(locs.uLightDir, -0.48, 0.78, -0.32);
 
@@ -234,8 +227,6 @@ interface Mesh {
 interface Locs {
   uViewProjection: WebGLUniformLocation | null;
   uExtent: WebGLUniformLocation | null;
-  uSweep: WebGLUniformLocation | null;
-  uReduceMotion: WebGLUniformLocation | null;
   uMode: WebGLUniformLocation | null;
   uTexture: WebGLUniformLocation | null;
   uLightDir: WebGLUniformLocation | null;
@@ -246,8 +237,6 @@ function locations(gl: WebGL2RenderingContext, program: WebGLProgram): Locs {
   return {
     uViewProjection: gl.getUniformLocation(program, "uViewProjection"),
     uExtent: gl.getUniformLocation(program, "uExtent"),
-    uSweep: gl.getUniformLocation(program, "uSweep"),
-    uReduceMotion: gl.getUniformLocation(program, "uReduceMotion"),
     uMode: gl.getUniformLocation(program, "uMode"),
     uTexture: gl.getUniformLocation(program, "uTexture"),
     uLightDir: gl.getUniformLocation(program, "uLightDir"),
@@ -264,17 +253,13 @@ layout(location=2) in vec2 aUv;
 layout(location=3) in vec3 aColor;
 uniform mat4 uViewProjection;
 uniform vec2 uExtent;
-uniform float uSweep;
-uniform float uReduceMotion;
 uniform int uMode;
 uniform vec3 uLightDir;
 uniform float uPresent;
 out vec3 vColor;
 out vec2 vUv;
-out float vLit;
 out float vMode;
 out float vAlpha;
-out float vSpec;
 out float vWall;
 void main() {
   vUv = aUv;
@@ -287,8 +272,8 @@ void main() {
   if (uMode == 0) {
     pos = vec3((aPosition.x - 0.5) * uExtent.x, 0.0, (aPosition.z - 0.5) * uExtent.y);
     color = vec3(1.0);
-    ambient = 0.72;
-    diffuseGain = 0.28;
+    ambient = 1.0;
+    diffuseGain = 0.0;
   } else if (uMode == 1) {
     pos = aPosition;
     float peak = clamp(aPosition.y / 0.55, 0.0, 1.0);
@@ -319,14 +304,8 @@ void main() {
   float ndotl = max(0.0, dot(normal, light));
   if (uMode == 1) ndotl = ndotl * 0.35 + 0.65;
   float diffuse = diffuseGain * ndotl;
-  float spec = 0.0;
-  float angle = atan(pos.z, pos.x);
-  float delta = abs(atan(sin(angle - uSweep), cos(angle - uSweep)));
-  float sweep = uReduceMotion > 0.5 ? 1.0 : mix(0.78, 1.18, 1.0 - smoothstep(0.0, 0.22, delta));
   vColor = color * (ambient + diffuse);
-  vLit = sweep;
   vAlpha = alpha;
-  vSpec = spec;
   vWall = aNormal.y < 0.5 ? 1.0 : 0.0;
   gl_Position = uViewProjection * vec4(pos, 1.0);
 }`;
@@ -335,10 +314,8 @@ void main() {
 precision highp float;
 in vec3 vColor;
 in vec2 vUv;
-in float vLit;
 in float vMode;
 in float vAlpha;
-in float vSpec;
 in float vWall;
 uniform sampler2D uTexture;
 uniform float uPresent;
@@ -348,8 +325,7 @@ void main() {
   vec3 base = vMode < 0.5 ? texture(uTexture, vUv).rgb : vColor;
   float alpha = (vMode > 0.5 && vMode < 1.5) || vMode > 3.5 ? vAlpha : 1.0;
   if (alpha < 0.5) discard;
-  vec3 lit = base * vLit + vec3(vSpec);
-  outColor = vec4(lit, 1.0);
+  outColor = vec4(base, 1.0);
 }`;
 
   const vertex = compile(gl, gl.VERTEX_SHADER, vs);

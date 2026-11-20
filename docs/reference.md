@@ -127,7 +127,7 @@ The conditions column then uses `describe`, `nextHours`, `hourLabel`, `dayLabel`
 
 Canvas fills `#d5e3ec`, draws MapTiler tiles when `basemap` is `maptiler`, then draws IEM tiles, then draws a pin. IEM URLs go to `mesonet.agron.iastate.edu` from the browser. Basemap URLs go to `/api/map/{z}/{x}/{y}.png`. Image loads use `crossOrigin = "anonymous"` and a module-level promise cache.
 
-When WebGL2 is available, a Flat / Relief control switches to `RadarRelief`. Relief keeps the same tiles, zoom range, and twelve-frame loop. Radar pixels pass through `denoiseRadar` before Flat or Relief draws them, so isolated speckle is gone in both. The ground is only the basemap (or the plain fill) plus the ZIP pin — not a copy of the Flat radar. Until you orbit, Relief keeps that same frame on the canvas and extrudes the wet cells up from it, in the widget and in fullscreen. `sampleEchoes` plus `buildEchoField` raise wet cells into an opaque heightfield on that same grid, with no extra spread; height follows the n0q color order (greens short, yellow mid, reds tall, purple tallest). Lighting and a faint sweep sit on that surface. Drag, wheel, zoom buttons, recenter, and fullscreen use the same map pan/zoom as Flat. Shift-drag or right-drag orbits; recenter returns to the pixel-locked view. `prefers-reduced-motion: reduce` freezes the sweep. An empty echo field keeps the ground and shows "No echoes in this view." Without WebGL2 the control stays hidden and the view stays flat.
+When WebGL2 is available, a Flat / Relief control switches to `RadarRelief`. Relief keeps the same tiles, zoom range, and twelve-frame loop. Radar pixels pass through `denoiseRadar` before Flat or Relief draws them, so isolated speckle is gone in both. The ground is only the basemap (or the plain fill) plus the ZIP pin — not a copy of the Flat radar. Until you orbit, Relief keeps that same frame on the canvas and extrudes the wet cells up from it, in the widget and in fullscreen. `sampleEchoes` plus `buildEchoField` raise wet cells into an opaque heightfield on that same grid, with no extra spread; height follows the n0q color order (greens short, yellow mid, reds tall, purple tallest). Mesh lighting stays on the heightfield only; the ground texture is drawn unshaded. Drag, wheel, zoom buttons, recenter, and fullscreen use the same map pan/zoom as Flat. Shift-drag or right-drag orbits; recenter returns to the pixel-locked view. An empty echo field keeps the ground and shows "No echoes in this view." Without WebGL2 the control stays hidden and the view stays flat.
 
 Until the first frame draws radar pixels, the card says "Loading radar…". If that frame has no radar tile, it says "Radar tiles unavailable".
 
@@ -145,8 +145,10 @@ The radar loop runs only while the popup is open on the Radar tab, playback is o
 
 ### IEM layer names
 
-- Latest scan: `nexrad-n0q-900913`
-- Older frame: `nexrad-n0q-900913-m{minutes}m` with minutes zero-padded to two digits, for example `nexrad-n0q-900913-m55m`
+Radar uses MRMS hybrid-scan reflectivity (cleaner than NEXRAD base reflectivity against ground clutter).
+
+- Latest scan: `q2-hsr-900913`
+- Older frame: `mrms::lcref-{YYYYMMDDHHMI}` where the stamp is UTC `now - offset`, floored to an even minute (MRMS archive step is 2 minutes). Example at `2026-11-20T05:10:00Z` with offset 55: `mrms::lcref-202611200414`
 
 ### Basemap URLs
 

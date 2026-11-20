@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { iemTileUrl, webRadarFrames } from "../lib/domain";
+import { RadarRelief } from "./RadarRelief";
+import { denoiseRadar, echoGrid, sampleEchoes, webgl2Available, type EchoSample } from "./radarRelief";
 
 interface RadarMapProps {
   latitude: number;
@@ -12,11 +14,14 @@ const MIN_ZOOM = 5;
 const MAX_ZOOM = 11;
 const cache = new Map<string, Promise<HTMLImageElement | null>>();
 
+type RadarMode = "flat" | "relief";
+
 export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
   const cardRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const frames = useMemo(() => webRadarFrames(), []);
+  const glOk = useMemo(() => webgl2Available(), []);
   const [index, setIndex] = useState(frames.length - 1);
   const [playing, setPlaying] = useState(true);
   const [zoom, setZoom] = useState(6);
@@ -25,26 +30,41 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
   const [failed, setFailed] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [sizeTick, setSizeTick] = useState(0);
+  const [mode, setMode] = useState<RadarMode>("flat");
+  const [echoes, setEchoes] = useState<EchoSample[]>([]);
+  const [echoCols, setEchoCols] = useState(200);
+  const [echoRows, setEchoRows] = useState(120);
+  const [ground, setGround] = useState<ImageData | null>(null);
   const drag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const zoomRef = useRef(zoom);
   const panRef = useRef(pan);
+  const modeRef = useRef(mode);
   const wheelRaf = useRef(0);
+  const reliefRecenter = useRef<(() => void) | null>(null);
   const tileZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.floor(zoom)));
   const frame = frames[index] ?? frames[frames.length - 1];
   const withBasemap = basemap === "maptiler";
+  const relief = mode === "relief" && glOk;
   zoomRef.current = zoom;
   panRef.current = pan;
+  modeRef.current = mode;
 
   useEffect(() => {
     setReady(false);
     setFailed(false);
     setPan({ x: 0, y: 0 });
+    setEchoes([]);
+    setGround(null);
   }, [latitude, longitude, basemap]);
 
   useEffect(() => {
     setReady(false);
     setFailed(false);
   }, [tileZoom]);
+
+  useEffect(() => {
+    if (!glOk && mode === "relief") setMode("flat");
+  }, [glOk, mode]);
 
   useEffect(() => {
     if (!playing) return undefined;
@@ -135,19 +155,46 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
     let cancelled = false;
-    void paint(canvas, latitude, longitude, zoom, pan, frame.layer, withBasemap, () => !cancelled).then((drewRadar) => {
+    void paint(
+      canvas,
+      latitude,
+      longitude,
+      zoom,
+      pan,
+      frame.layer,
+      withBasemap,
+      relief ? "relief" : "flat",
+      () => !cancelled,
+    ).then((result) => {
       if (cancelled) return;
-      if (drewRadar) {
+      if (result.drewRadar) {
         setReady(true);
         setFailed(false);
+        if (relief) {
+          setEchoes(result.echoes);
+          setEchoCols(result.cols);
+          setEchoRows(result.rows);
+          setGround(result.ground);
+        }
       } else {
         setFailed(true);
+        if (relief) {
+          setEchoes([]);
+          setGround(null);
+        }
       }
     });
     return () => {
       cancelled = true;
     };
-  }, [latitude, longitude, zoom, pan, frame.layer, withBasemap, sizeTick]);
+  }, [latitude, longitude, zoom, pan, frame.layer, withBasemap, sizeTick, relief]);
+
+  useEffect(() => {
+    if (!relief) return;
+    setReady(false);
+    setEchoes([]);
+    setGround(null);
+  }, [relief]);
 
   async function toggleFullscreen() {
     const card = cardRef.current;
@@ -184,27 +231,68 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
     setPan(next.pan);
   }
 
+  function recenter() {
+    panRef.current = { x: 0, y: 0 };
+    setPan({ x: 0, y: 0 });
+    reliefRecenter.current?.();
+  }
+
   return (
     <section ref={cardRef} className="radar-card" aria-label="Radar">
-      <div ref={stageRef} className="radar-stage">
+      <div
+        ref={stageRef}
+        className="radar-stage"
+        onPointerDown={(event) => {
+          if (event.button !== 0 || event.shiftKey) return;
+          if ((event.target as Element | null)?.closest?.(".zoom-controls, button, input, a")) return;
+          drag.current = { x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+        onPointerMove={(event) => {
+          const start = drag.current;
+          if (!start) return;
+          setPan({ x: start.panX + event.clientX - start.x, y: start.panY + event.clientY - start.y });
+        }}
+        onPointerUp={() => {
+          drag.current = null;
+        }}
+        onPointerCancel={() => {
+          drag.current = null;
+        }}
+      >
         <canvas
           ref={canvasRef}
-          className="radar-overlay"
-          onPointerDown={(event) => {
-            drag.current = { x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
-            event.currentTarget.setPointerCapture(event.pointerId);
-          }}
-          onPointerMove={(event) => {
-            const start = drag.current;
-            if (!start) return;
-            setPan({ x: start.panX + event.clientX - start.x, y: start.panY + event.clientY - start.y });
-          }}
-          onPointerUp={() => {
-            drag.current = null;
-          }}
+          className={`radar-overlay${relief ? " radar-overlay-hidden" : ""}`}
+          aria-hidden={relief}
         />
-        {!ready && <div className="radar-placeholder">{failed ? "Radar tiles unavailable" : "Loading radar…"}</div>}
+        {relief && ready && ground && (
+          <RadarRelief
+            echoes={echoes}
+            cols={echoCols}
+            rows={echoRows}
+            ground={ground}
+            empty={echoes.length === 0}
+            onRecenterRef={(fn) => {
+              reliefRecenter.current = fn;
+            }}
+          />
+        )}
+        {(!ready || (relief && !ground)) && (
+          <div className="radar-placeholder">{failed ? "Radar tiles unavailable" : "Loading radar…"}</div>
+        )}
         <div className="zoom-controls">
+          {glOk && (
+            <button
+              type="button"
+              className="mode-toggle"
+              aria-pressed={relief}
+              aria-label={relief ? "Switch to flat radar" : "Switch to relief radar"}
+              title={relief ? "Flat" : "Relief"}
+              onClick={() => setMode((current) => (current === "flat" ? "relief" : "flat"))}
+            >
+              {relief ? "3D" : "2D"}
+            </button>
+          )}
           <button type="button" onClick={() => zoomBy(1)} aria-label="Zoom in">
             +
           </button>
@@ -215,8 +303,7 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
             type="button"
             disabled={Math.hypot(pan.x, pan.y) < 0.5}
             onClick={(event) => {
-              panRef.current = { x: 0, y: 0 };
-              setPan({ x: 0, y: 0 });
+              recenter();
               event.currentTarget.blur();
             }}
             aria-label="Recenter on ZIP"
@@ -256,6 +343,7 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
       </div>
       <p className="radar-caption">
         {frame.label} · Base reflectivity, NOAA NEXRAD
+        {relief ? " · Relief" : ""}
       </p>
       <p className="radar-note">
         {withBasemap
@@ -287,6 +375,14 @@ function zoomToward(
   };
 }
 
+interface PaintResult {
+  drewRadar: boolean;
+  ground: ImageData | null;
+  echoes: EchoSample[];
+  cols: number;
+  rows: number;
+}
+
 async function paint(
   canvas: HTMLCanvasElement,
   latitude: number,
@@ -295,27 +391,75 @@ async function paint(
   pan: { x: number; y: number },
   layer: string,
   withBasemap: boolean,
+  mode: RadarMode,
   active: () => boolean,
-): Promise<boolean> {
+): Promise<PaintResult> {
+  const empty: PaintResult = { drewRadar: false, ground: null, echoes: [], cols: 200, rows: 120 };
   const view = readView(canvas, latitude, longitude, zoom, pan);
-  if (!view) return false;
+  if (!view) return empty;
   const tiles: Array<Promise<Placed>> = [];
   forEachTile(view, (url, dx, dy, kind) => {
     tiles.push(place(url, dx, dy, kind));
   }, withBasemap, layer);
   const placed = await Promise.all(tiles);
-  if (!active()) return false;
+  if (!active()) return empty;
   const context = prepareCanvas(canvas, view);
-  if (!context) return false;
+  if (!context) return empty;
+
+  const drewRadar = placed.some((tile) => tile.kind === "radar" && tile.image);
+  const radar = filteredRadar(placed, view, canvas.width, canvas.height);
+  if (mode === "flat") {
+    context.fillStyle = "#d5e3ec";
+    context.fillRect(0, 0, view.viewWidth, view.viewHeight);
+    for (const tile of placed) {
+      if (tile.kind === "base" && tile.image) context.drawImage(tile.image, tile.dx, tile.dy, TILE, TILE);
+    }
+    if (radar) {
+      context.save();
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      context.drawImage(radar.canvas, 0, 0);
+      context.restore();
+    }
+    drawPin(context, (view.center.x - view.left) * TILE, (view.center.y - view.top) * TILE);
+    return { drewRadar, ground: null, echoes: [], cols: 200, rows: 120 };
+  }
+
+  // Ground = table under the heightfield: basemap (or plain) + pin. No Flat radar underlay.
   context.fillStyle = "#d5e3ec";
   context.fillRect(0, 0, view.viewWidth, view.viewHeight);
-  for (const kind of ["base", "radar"] as const) {
-    for (const tile of placed) {
-      if (tile.kind === kind && tile.image) context.drawImage(tile.image, tile.dx, tile.dy, TILE, TILE);
-    }
+  for (const tile of placed) {
+    if (tile.kind === "base" && tile.image) context.drawImage(tile.image, tile.dx, tile.dy, TILE, TILE);
   }
   drawPin(context, (view.center.x - view.left) * TILE, (view.center.y - view.top) * TILE);
-  return placed.some((tile) => tile.kind === "radar" && tile.image);
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  const ground = context.getImageData(0, 0, canvas.width, canvas.height);
+  const grid = radar ? echoGrid(radar.image.width, radar.image.height) : { cols: 200, rows: 120 };
+  const echoes = radar ? sampleEchoes(radar.image, grid.cols, grid.rows) : [];
+  return { drewRadar, ground, echoes, cols: grid.cols, rows: grid.rows };
+}
+
+function filteredRadar(
+  placed: Placed[],
+  view: View,
+  width: number,
+  height: number,
+): { canvas: HTMLCanvasElement; image: ImageData } | null {
+  if (width <= 0 || height <= 0) return null;
+  const radarCanvas = document.createElement("canvas");
+  radarCanvas.width = width;
+  radarCanvas.height = height;
+  const radarContext = radarCanvas.getContext("2d", { willReadFrequently: true });
+  if (!radarContext) return null;
+  radarContext.setTransform(view.ratio * view.scale, 0, 0, view.ratio * view.scale, 0, 0);
+  radarContext.clearRect(0, 0, view.viewWidth, view.viewHeight);
+  for (const tile of placed) {
+    if (tile.kind === "radar" && tile.image) radarContext.drawImage(tile.image, tile.dx, tile.dy, TILE, TILE);
+  }
+  radarContext.setTransform(1, 0, 0, 1, 0, 0);
+  const image = radarContext.getImageData(0, 0, width, height);
+  denoiseRadar(image);
+  radarContext.putImageData(image, 0, 0);
+  return { canvas: radarCanvas, image };
 }
 
 interface View {
@@ -353,7 +497,7 @@ function readView(
 }
 
 function prepareCanvas(canvas: HTMLCanvasElement, view: View): CanvasRenderingContext2D | null {
-  const context = canvas.getContext("2d");
+  const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) return null;
   canvas.width = Math.round(view.cssWidth * view.ratio);
   canvas.height = Math.round(view.cssHeight * view.ratio);

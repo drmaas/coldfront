@@ -216,7 +216,7 @@ export function buildEchoField(
     color[o + 1] = echo.g / 255;
     color[o + 2] = echo.b / 255;
   }
-  let smoothed = height;
+  let smoothed: Float32Array = height;
   for (let pass = 0; pass < 4; pass += 1) smoothed = softenWet(smoothed, cols, rows);
   return { cols, rows, height: smoothed, color: softenColors(color, smoothed, cols, rows) };
 }

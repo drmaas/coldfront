@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildEchoField, denoiseRadar, sampleEchoes } from "./radarRelief";
+import { buildEchoField, denoiseRadar, fitOrthoHalfExtents, sampleEchoes } from "./radarRelief";
 
 function imageData(
   width: number,
@@ -133,5 +133,21 @@ describe("sampleEchoes", () => {
     const field = buildEchoField(echoes, 4, 2);
     expect(field.height.length).toBe(8);
     expect(Math.max(...field.height)).toBeGreaterThan(0.2);
+  });
+});
+
+describe("fitOrthoHalfExtents", () => {
+  it("covers a wide board without letterboxing", () => {
+    const fitted = fitOrthoHalfExtents(2, 1, 4 / 3, "cover");
+    expect(fitted.halfW / fitted.halfH).toBeCloseTo(4 / 3);
+    expect(fitted.halfW).toBeLessThan(2);
+    expect(fitted.halfH).toBe(1);
+  });
+
+  it("contains a tall board with side letterboxing", () => {
+    const fitted = fitOrthoHalfExtents(1, 2, 4 / 3, "contain");
+    expect(fitted.halfW / fitted.halfH).toBeCloseTo(4 / 3);
+    expect(fitted.halfW).toBeGreaterThan(1);
+    expect(fitted.halfH).toBe(2);
   });
 });

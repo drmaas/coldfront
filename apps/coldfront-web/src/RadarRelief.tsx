@@ -1,5 +1,11 @@
 import { useEffect, useRef } from "react";
-import { buildEchoField, DEFAULT_COLS, DEFAULT_ROWS, type EchoSample } from "./radarRelief";
+import {
+  buildEchoField,
+  DEFAULT_COLS,
+  DEFAULT_ROWS,
+  fitOrthoHalfExtents,
+  type EchoSample,
+} from "./radarRelief";
 
 export interface RadarReliefProps {
   echoes: EchoSample[];
@@ -617,16 +623,20 @@ function orthoForBoard(
     maxY = Math.max(maxY, py);
   }
   const dolly = locked ? 1 : clamp(distance / 2.9, 0.75, 1.45);
-  const pad = locked ? 1 : 1.02;
-  let halfW = ((maxX - minX) / 2) * pad * dolly;
-  let halfH = ((maxY - minY) / 2) * pad * dolly;
-  if (halfW / halfH > aspect) halfH = halfW / aspect;
-  else halfW = halfH * aspect;
+  // Locked: overscan + cover so the tilted board reaches every stage edge.
+  // Contain left a CLEAR (#d5e3ec) letterbox that read as a gray overlay with light seams.
+  const pad = locked ? 0.96 : 1.02;
+  const fitted = fitOrthoHalfExtents(
+    ((maxX - minX) / 2) * pad * dolly,
+    ((maxY - minY) / 2) * pad * dolly,
+    aspect,
+    locked ? "cover" : "contain",
+  );
   const near = 0.05;
   const far = 40;
   return new Float32Array([
-    1 / halfW, 0, 0, 0,
-    0, 1 / halfH, 0, 0,
+    1 / fitted.halfW, 0, 0, 0,
+    0, 1 / fitted.halfH, 0, 0,
     0, 0, -2 / (far - near), 0,
     0, 0, -(far + near) / (far - near), 1,
   ]);

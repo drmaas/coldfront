@@ -333,6 +333,22 @@ function bandFor(
   return null;
 }
 
+/** Match a view frustum to the canvas aspect. Cover fills the stage; contain letterboxes. */
+export function fitOrthoHalfExtents(
+  halfW: number,
+  halfH: number,
+  aspect: number,
+  mode: "cover" | "contain",
+): { halfW: number; halfH: number } {
+  if (halfW <= 0 || halfH <= 0 || aspect <= 0) return { halfW, halfH };
+  if (mode === "cover") {
+    if (halfW / halfH > aspect) return { halfW: halfH * aspect, halfH };
+    return { halfW, halfH: halfW / aspect };
+  }
+  if (halfW / halfH > aspect) return { halfW, halfH: halfW / aspect };
+  return { halfW: halfH * aspect, halfH };
+}
+
 /** True when the browser can create a WebGL2 context. */
 export function webgl2Available(): boolean {
   if (typeof document === "undefined") return false;

@@ -1252,6 +1252,7 @@
     "precipitation_probability_max": "%",
     "precipitation_sum": "mm",
     "wind_speed_10m_max": "km/h",
+    "relative_humidity_2m_mean": "%",
     "sunrise": "iso8601",
     "sunset": "iso8601"
   },
@@ -1339,6 +1340,18 @@
       14.4,
       16.1,
       17.3
+    ],
+    "relative_humidity_2m_mean": [
+      59,
+      53,
+      59,
+      70,
+      86,
+      68,
+      46,
+      39,
+      54,
+      66
     ],
     "sunrise": [
       "2026-11-17T07:11",

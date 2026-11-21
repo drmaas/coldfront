@@ -22,6 +22,7 @@ import {
   type Forecast,
   type Place,
 } from "../lib/domain";
+import { FORECAST_DAY_DETAILS_ID, dayRowButtonA11y } from "./forecastDayA11y";
 import { ColdFront, PrecipDrop, WeatherIcon, Wordmark } from "./icons";
 import { RadarMap } from "./RadarMap";
 import {
@@ -294,7 +295,7 @@ function ForecastBody({ data, units }: { data: ForecastData; units: Units }) {
         </div>
         <ColdFront className="divider" />
         <h2>10-day forecast</h2>
-        <ol className="days" role="listbox" aria-label="10-day forecast">
+        <ol className="days" aria-label="10-day forecast">
           {forecast.daily.map((day, index) => {
             const info = describe(day.weatherCode);
             const low = displayTemperature(day.tempMinC, fahrenheit);
@@ -305,10 +306,9 @@ function ForecastBody({ data, units }: { data: ForecastData; units: Units }) {
               <li key={day.date}>
                 <button
                   type="button"
-                  role="option"
-                  aria-selected={selected}
                   className={`day-row${selected ? " selected" : ""}`}
                   onClick={() => setSelectedDay(index)}
+                  {...dayRowButtonA11y(selected)}
                 >
                   <span className="day-name">{dayLabel(day.date, today)}</span>
                   <WeatherIcon name={info.icon} />
@@ -365,8 +365,11 @@ function DayDetails({ day, dayTitle, fahrenheit }: { day: Day; dayTitle: string;
     const formatted = formatClockTime(day.sunset);
     if (formatted) rows.push({ label: "Sunset", value: formatted });
   }
+  if (day.humidityMean !== null) {
+    rows.push({ label: "Humidity", value: `${day.humidityMean}%` });
+  }
   return (
-    <section className="day-details" aria-live="polite">
+    <section className="day-details" id={FORECAST_DAY_DETAILS_ID} aria-live="polite">
       <h3>{dayTitle}</h3>
       <dl className="day-detail-grid">
         {rows.map((row) => (

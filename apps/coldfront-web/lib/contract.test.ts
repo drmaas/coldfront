@@ -71,6 +71,7 @@ const contract = fixture("contract.json") as {
     wind_max_kmh: number;
     sunrise: string;
     sunset: string;
+    humidity_mean: number;
   };
   next_hour0_pop: number;
   daily4_pop: number;
@@ -152,6 +153,7 @@ describe("shared fixtures", () => {
     expect(forecast.daily[0].windMaxKmh).toBeCloseTo(contract.daily0.wind_max_kmh, 3);
     expect(formatClockTime(forecast.daily[0].sunrise!)).toBe(contract.daily0.sunrise);
     expect(formatClockTime(forecast.daily[0].sunset!)).toBe(contract.daily0.sunset);
+    expect(forecast.daily[0].humidityMean).toBe(contract.daily0.humidity_mean);
     expect(forecast.daily[4].precipProbability).toBe(contract.daily4_pop);
     expect(displayTemperature(forecast.current.temperatureC, true)).toBe(contract.display.temp_f);
     expect(displayTemperature(forecast.current.apparentC, true)).toBe(contract.display.apparent_f);

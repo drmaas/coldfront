@@ -47,6 +47,7 @@ pub struct Day {
     pub wind_max_kmh: Option<f64>,
     pub sunrise: Option<String>,
     pub sunset: Option<String>,
+    pub humidity_mean: Option<i32>,
 }
 
 /// Parse an Open-Meteo forecast response that uses Celsius and km/h.
@@ -85,6 +86,7 @@ pub fn parse_open_meteo(bytes: &[u8]) -> Result<Forecast, Error> {
     let day_winds = optional_number_array(daily, "wind_speed_10m_max", day_times.len());
     let day_sunrise = optional_string_array(daily, "sunrise", day_times.len());
     let day_sunset = optional_string_array(daily, "sunset", day_times.len());
+    let day_humidity = optional_number_array(daily, "relative_humidity_2m_mean", day_times.len());
     if day_times.len() != day_codes.len()
         || day_times.len() != day_max.len()
         || day_times.len() != day_min.len()
@@ -124,6 +126,7 @@ pub fn parse_open_meteo(bytes: &[u8]) -> Result<Forecast, Error> {
                 wind_max_kmh: day_winds[index],
                 sunrise: day_sunrise[index].clone(),
                 sunset: day_sunset[index].clone(),
+                humidity_mean: day_humidity[index].map(round_code),
             }
         })
         .collect();
@@ -416,9 +419,46 @@ mod tests {
         assert_eq!(first.precip_sum_mm, None);
         assert_eq!(forecast.daily[1].sunrise, None);
         assert_eq!(forecast.daily[1].wind_max_kmh, None);
+        assert_eq!(first.humidity_mean, None);
         assert_eq!(
             format_clock_time(first.sunrise.as_deref().unwrap()),
             Some("7:12 AM".into())
         );
+    }
+
+    #[test]
+    fn daily_mean_humidity_rounds_and_missing_stays_none() {
+        let body = br#"{
+            "latitude": 0,
+            "longitude": 0,
+            "timezone": "UTC",
+            "current": {
+                "time": "2026-11-17T12:00",
+                "temperature_2m": 10,
+                "apparent_temperature": 10,
+                "relative_humidity_2m": 50,
+                "wind_speed_10m": 5,
+                "weather_code": 1,
+                "is_day": 1
+            },
+            "hourly": {
+                "time": ["2026-11-17T12:00"],
+                "temperature_2m": [10],
+                "weather_code": [1],
+                "precipitation_probability": [0],
+                "is_day": [1]
+            },
+            "daily": {
+                "time": ["2026-11-17", "2026-11-18"],
+                "weather_code": [1, 2],
+                "temperature_2m_max": [12, 11],
+                "temperature_2m_min": [5, 4],
+                "precipitation_probability_max": [10, 20],
+                "relative_humidity_2m_mean": [58.4, null]
+            }
+        }"#;
+        let forecast = parse_open_meteo(body).expect("forecast");
+        assert_eq!(forecast.daily[0].humidity_mean, Some(58));
+        assert_eq!(forecast.daily[1].humidity_mean, None);
     }
 }

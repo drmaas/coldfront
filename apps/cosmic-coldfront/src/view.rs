@@ -286,14 +286,11 @@ fn current_tab(app: &AppModel) -> Element<'_, Message> {
                 display_icon(info.icon, forecast.current.is_day),
                 56.0,
             ))
+            .push(widget::text::title1(format!("{temp}°{}", app.unit_suffix())))
             .push(
-                widget::Column::new()
-                    .spacing(spacing.space_xxxs)
-                    .push(widget::text::title1(format!(
-                        "{temp}°{}",
-                        app.unit_suffix()
-                    )))
-                    .push(widget::text::body(info.label)),
+                widget::text::body(info.label)
+                    .width(Length::Fill)
+                    .class(cosmic::style::Text::Color(Color::from_rgb(0.45, 0.48, 0.52))),
             ),
     );
 
@@ -548,6 +545,13 @@ fn hourly_tab(app: &AppModel) -> Element<'_, Message> {
             .precip_probability
             .map(|value| format!("{value}%"))
             .unwrap_or_else(|| " ".into());
+        let low_pop = hour.precip_probability.is_some_and(|value| value <= 5);
+        let mut pop_label = widget::text::caption(pop)
+            .width(Length::Fixed(HOUR_COLUMN))
+            .align_x(Alignment::Center);
+        if low_pop {
+            pop_label = pop_label.class(cosmic::style::Text::Color(Color::from_rgb(0.55, 0.58, 0.62)));
+        }
         icons = icons.push(
             widget::Column::new()
                 .spacing(2)
@@ -555,11 +559,7 @@ fn hourly_tab(app: &AppModel) -> Element<'_, Message> {
                 .width(Length::Fixed(HOUR_COLUMN))
                 .push(weather_icon(display_icon(info.icon, hour.is_day), 28.0))
                 .push(widget::text::body(format!("{temp}°")))
-                .push(
-                    widget::text::caption(pop)
-                        .width(Length::Fixed(HOUR_COLUMN))
-                        .align_x(Alignment::Center),
-                ),
+                .push(pop_label),
         );
         labels = labels.push(
             widget::container(widget::text::caption(hour_label(&hour.time, index == 0)))
@@ -692,6 +692,9 @@ fn day_details_panel(day: &Day, title: &str, fahrenheit: bool) -> Element<'stati
         fl!("precip-chance"),
         format!("{}%", day.precip_probability),
     ));
+    if let Some(humidity) = day.humidity_mean {
+        col = col.push(detail_pair(fl!("humidity"), format!("{humidity}%")));
+    }
     if let Some(mm) = day.precip_sum_mm.filter(|value| *value > 0.0) {
         col = col.push(detail_pair(
             fl!("precip-amount"),

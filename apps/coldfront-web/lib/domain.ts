@@ -38,6 +38,7 @@ export interface Day {
   windMaxKmh: number | null;
   sunrise: string | null;
   sunset: string | null;
+  humidityMean: number | null;
 }
 
 export interface Forecast {
@@ -210,6 +211,7 @@ export function parseOpenMeteo(body: unknown): Forecast {
   const dayWinds = optionalNumberArray(daily, "wind_speed_10m_max", dayTimes.length);
   const daySunrise = optionalStringArray(daily, "sunrise", dayTimes.length);
   const daySunset = optionalStringArray(daily, "sunset", dayTimes.length);
+  const dayHumidity = optionalNumberArray(daily, "relative_humidity_2m_mean", dayTimes.length);
   if (
     dayTimes.length !== dayCodes.length ||
     dayTimes.length !== dayMax.length ||
@@ -248,6 +250,8 @@ export function parseOpenMeteo(body: unknown): Forecast {
       windMaxKmh: dayWinds[index],
       sunrise: daySunrise[index],
       sunset: daySunset[index],
+      humidityMean:
+        dayHumidity[index] === null ? null : roundHalfAwayFromZero(dayHumidity[index] as number),
     })),
   };
 }

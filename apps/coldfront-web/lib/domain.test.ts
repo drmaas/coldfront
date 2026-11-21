@@ -71,5 +71,40 @@ describe("parseOpenMeteo optional fields", () => {
     expect(day.sunset).toBeNull();
     expect(day.precipSumMm).toBeNull();
     expect(day.windMaxKmh).toBeNull();
+    expect(day.humidityMean).toBeNull();
+  });
+
+  it("rounds daily mean humidity when present", () => {
+    const forecast = parseOpenMeteo({
+      latitude: 0,
+      longitude: 0,
+      timezone: "UTC",
+      current: {
+        time: "2026-11-17T12:00",
+        temperature_2m: 10,
+        apparent_temperature: 10,
+        relative_humidity_2m: 50,
+        wind_speed_10m: 5,
+        weather_code: 1,
+        is_day: 1,
+      },
+      hourly: {
+        time: ["2026-11-17T12:00"],
+        temperature_2m: [10],
+        weather_code: [1],
+        precipitation_probability: [0],
+        is_day: [1],
+      },
+      daily: {
+        time: ["2026-11-17", "2026-11-18"],
+        weather_code: [1, 2],
+        temperature_2m_max: [12, 11],
+        temperature_2m_min: [5, 4],
+        precipitation_probability_max: [10, 20],
+        relative_humidity_2m_mean: [58.4, null],
+      },
+    });
+    expect(forecast.daily[0].humidityMean).toBe(58);
+    expect(forecast.daily[1].humidityMean).toBeNull();
   });
 });

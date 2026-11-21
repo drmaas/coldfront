@@ -58,7 +58,8 @@
     "precip_sum_mm": 0.0,
     "wind_max_kmh": 18.4,
     "sunrise": "7:11 AM",
-    "sunset": "4:44 PM"
+    "sunset": "4:44 PM",
+    "humidity_mean": 59
   },
   "next_hour0_pop": 0,
   "daily4_pop": 64,

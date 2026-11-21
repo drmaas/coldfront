@@ -187,6 +187,10 @@ fn place_forecast_and_labels_match_the_contract() {
         Some(daily0["sunset"].as_str().unwrap().to_string())
     );
     assert_eq!(
+        forecast.daily[0].humidity_mean,
+        Some(daily0["humidity_mean"].as_i64().unwrap() as i32)
+    );
+    assert_eq!(
         forecast.daily[4].precip_probability,
         contract["daily4_pop"].as_i64().unwrap() as i32
     );

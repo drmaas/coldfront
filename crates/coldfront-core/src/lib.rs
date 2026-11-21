@@ -21,7 +21,8 @@ pub use chart::{ChartPoint, RangePlacement, chart_points, range_placement};
 pub use client::HttpClient;
 pub use error::Error;
 pub use forecast::{
-    Day, Forecast, Hour, day_label, format_as_of, hour_label, next_hours, parse_open_meteo,
+    Day, Forecast, Hour, day_label, format_as_of, format_clock_time, format_precip_amount_mm,
+    hour_label, next_hours, parse_open_meteo,
 };
 pub use place::{Place, parse_zippopotam};
 pub use radar::{

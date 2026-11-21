@@ -10,6 +10,7 @@ import {
   displayTemperature,
   displayWindMph,
   formatAsOf,
+  formatClockTime,
   hourLabel,
   iemTileUrl,
   isUsZip,
@@ -61,7 +62,18 @@ const contract = fixture("contract.json") as {
   next_hour_time: string;
   next_hour_labels: string[];
   day_labels: string[];
-  daily0: { max_c: number; min_c: number; pop: number; code: number };
+  daily0: {
+    max_c: number;
+    min_c: number;
+    pop: number;
+    code: number;
+    precip_sum_mm: number;
+    wind_max_kmh: number;
+    sunrise: string;
+    sunset: string;
+    humidity_mean: number;
+  };
+  next_hour0_pop: number;
   daily4_pop: number;
   display: { temp_f: number; apparent_f: number; temp_c: number; wind_mph: number };
   rounding: { input: number; away_from_zero: number };
@@ -124,6 +136,7 @@ describe("shared fixtures", () => {
     const hours = nextHours(forecast, 24);
     expect(hours).toHaveLength(24);
     expect(hours[0].time).toBe(contract.next_hour_time);
+    expect(hours[0].precipProbability).toBe(contract.next_hour0_pop);
     expect(hours[0].isDay).toBe(true);
     expect(hours[1].isDay).toBe(false);
     expect(hours.slice(0, 9).map((hour, index) => hourLabel(hour.time, index === 0))).toEqual(
@@ -136,6 +149,11 @@ describe("shared fixtures", () => {
     expect(forecast.daily[0].tempMinC).toBeCloseTo(contract.daily0.min_c, 3);
     expect(forecast.daily[0].precipProbability).toBe(contract.daily0.pop);
     expect(forecast.daily[0].weatherCode).toBe(contract.daily0.code);
+    expect(forecast.daily[0].precipSumMm).toBeCloseTo(contract.daily0.precip_sum_mm, 3);
+    expect(forecast.daily[0].windMaxKmh).toBeCloseTo(contract.daily0.wind_max_kmh, 3);
+    expect(formatClockTime(forecast.daily[0].sunrise!)).toBe(contract.daily0.sunrise);
+    expect(formatClockTime(forecast.daily[0].sunset!)).toBe(contract.daily0.sunset);
+    expect(forecast.daily[0].humidityMean).toBe(contract.daily0.humidity_mean);
     expect(forecast.daily[4].precipProbability).toBe(contract.daily4_pop);
     expect(displayTemperature(forecast.current.temperatureC, true)).toBe(contract.display.temp_f);
     expect(displayTemperature(forecast.current.apparentC, true)).toBe(contract.display.apparent_f);

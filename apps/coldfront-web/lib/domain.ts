@@ -24,7 +24,7 @@ export interface Hour {
   time: string;
   temperatureC: number;
   weatherCode: number;
-  precipProbability: number;
+  precipProbability: number | null;
   isDay: boolean;
 }
 
@@ -34,6 +34,11 @@ export interface Day {
   tempMaxC: number;
   tempMinC: number;
   precipProbability: number;
+  precipSumMm: number | null;
+  windMaxKmh: number | null;
+  sunrise: string | null;
+  sunset: string | null;
+  humidityMean: number | null;
 }
 
 export interface Forecast {
@@ -187,7 +192,7 @@ export function parseOpenMeteo(body: unknown): Forecast {
   const hourTimes = stringArray(hourly, "time");
   const hourTemps = numberArray(hourly, "temperature_2m");
   const hourCodes = numberArray(hourly, "weather_code");
-  const hourPops = numberArray(hourly, "precipitation_probability");
+  const hourPops = optionalPrecipArray(hourly, "precipitation_probability", hourTimes.length);
   const hourIsDay = numberArray(hourly, "is_day");
   if (
     hourTimes.length !== hourTemps.length ||
@@ -202,6 +207,11 @@ export function parseOpenMeteo(body: unknown): Forecast {
   const dayMax = numberArray(daily, "temperature_2m_max");
   const dayMin = numberArray(daily, "temperature_2m_min");
   const dayPops = numberArray(daily, "precipitation_probability_max");
+  const daySums = optionalNumberArray(daily, "precipitation_sum", dayTimes.length);
+  const dayWinds = optionalNumberArray(daily, "wind_speed_10m_max", dayTimes.length);
+  const daySunrise = optionalStringArray(daily, "sunrise", dayTimes.length);
+  const daySunset = optionalStringArray(daily, "sunset", dayTimes.length);
+  const dayHumidity = optionalNumberArray(daily, "relative_humidity_2m_mean", dayTimes.length);
   if (
     dayTimes.length !== dayCodes.length ||
     dayTimes.length !== dayMax.length ||
@@ -227,7 +237,7 @@ export function parseOpenMeteo(body: unknown): Forecast {
       time,
       temperatureC: hourTemps[index],
       weatherCode: roundHalfAwayFromZero(hourCodes[index]),
-      precipProbability: roundHalfAwayFromZero(hourPops[index]),
+      precipProbability: hourPops[index],
       isDay: hourIsDay[index] !== 0,
     })),
     daily: dayTimes.map((date, index) => ({
@@ -236,6 +246,12 @@ export function parseOpenMeteo(body: unknown): Forecast {
       tempMaxC: dayMax[index],
       tempMinC: dayMin[index],
       precipProbability: roundHalfAwayFromZero(dayPops[index]),
+      precipSumMm: daySums[index],
+      windMaxKmh: dayWinds[index],
+      sunrise: daySunrise[index],
+      sunset: daySunset[index],
+      humidityMean:
+        dayHumidity[index] === null ? null : roundHalfAwayFromZero(dayHumidity[index] as number),
     })),
   };
 }
@@ -275,12 +291,21 @@ export function nextHours(forecast: Forecast, count: number): Hour[] {
 }
 
 export function formatAsOf(time: string): string {
+  return formatClockTime(time) ?? time;
+}
+
+export function formatClockTime(time: string): string | null {
   const hour = clockHour(time);
-  if (hour === null) return time;
+  if (hour === null) return null;
   const minute = time.slice(14, 16) || "00";
   const suffix = hour >= 12 ? "PM" : "AM";
   const hour12 = hour % 12 === 0 ? 12 : hour % 12;
   return `${hour12}:${minute} ${suffix}`;
+}
+
+export function formatPrecipAmountMm(mm: number, fahrenheit: boolean): string {
+  if (fahrenheit) return `${roundHalfAwayFromZero(mm / 25.4 * 100) / 100} in`;
+  return `${roundHalfAwayFromZero(mm * 10) / 10} mm`;
 }
 
 export function hourLabel(time: string, isNow: boolean): string {
@@ -466,6 +491,45 @@ function numberArray(value: Record<string, unknown>, key: string): number[] {
     if (typeof entry !== "number" || !Number.isFinite(entry)) throw new Error(`bad ${key}`);
     return entry;
   });
+}
+
+function optionalPrecipArray(
+  value: Record<string, unknown>,
+  key: string,
+  length: number,
+): Array<number | null> {
+  const item = value[key];
+  if (!Array.isArray(item)) return Array.from({ length }, () => null);
+  if (item.length !== length) throw new Error(`bad ${key}`);
+  return item.map((entry) => {
+    if (entry === null) return null;
+    if (typeof entry !== "number" || !Number.isFinite(entry)) throw new Error(`bad ${key}`);
+    return roundHalfAwayFromZero(entry);
+  });
+}
+
+function optionalNumberArray(
+  value: Record<string, unknown>,
+  key: string,
+  length: number,
+): Array<number | null> {
+  const item = value[key];
+  if (!Array.isArray(item) || item.length !== length) return Array.from({ length }, () => null);
+  return item.map((entry) => {
+    if (entry === null) return null;
+    if (typeof entry !== "number" || !Number.isFinite(entry)) return null;
+    return entry;
+  });
+}
+
+function optionalStringArray(
+  value: Record<string, unknown>,
+  key: string,
+  length: number,
+): Array<string | null> {
+  const item = value[key];
+  if (!Array.isArray(item) || item.length !== length) return Array.from({ length }, () => null);
+  return item.map((entry) => (typeof entry === "string" && entry.length > 0 ? entry : null));
 }
 
 function text(value: Record<string, unknown>, key: string): string {

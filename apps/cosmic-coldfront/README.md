@@ -6,7 +6,7 @@ The panel button shows a symbolic weather icon. After a successful load it also 
 
 Settings are the ZIP code, °F or °C, an optional MapTiler key, and an OpenStreetMap basemap toggle. That toggle defaults to off. Turn it on only on a personal machine. See [Architecture](../../docs/architecture.md#radar-and-basemap) for the basemap order.
 
-The applet fetches a 10-day forecast and displays current conditions. It does not draw the hourly chart or the 10-day list.
+The applet fetches a 10-day forecast and displays current conditions, a 24-hour temperature strip, and a selectable 10-day list in the popup tabs.
 
 Strings live in `i18n/en/cosmic_coldfront.ftl`. The desktop file, metainfo, and icon under `resources/` are installed as-is.
 

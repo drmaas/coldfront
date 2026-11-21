@@ -54,8 +54,14 @@
     "max_c": 12.9,
     "min_c": 6.0,
     "pop": 0,
-    "code": 45
+    "code": 45,
+    "precip_sum_mm": 0.0,
+    "wind_max_kmh": 18.4,
+    "sunrise": "7:11 AM",
+    "sunset": "4:44 PM",
+    "humidity_mean": 59
   },
+  "next_hour0_pop": 0,
   "daily4_pop": 64,
   "display": {
     "temp_f": 51,

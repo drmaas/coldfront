@@ -32,7 +32,7 @@ pub struct Hour {
     pub time: String,
     pub temperature_c: f64,
     pub weather_code: i32,
-    pub precip_probability: i32,
+    pub precip_probability: Option<i32>,
     pub is_day: bool,
 }
 
@@ -43,6 +43,11 @@ pub struct Day {
     pub temp_max_c: f64,
     pub temp_min_c: f64,
     pub precip_probability: i32,
+    pub precip_sum_mm: Option<f64>,
+    pub wind_max_kmh: Option<f64>,
+    pub sunrise: Option<String>,
+    pub sunset: Option<String>,
+    pub humidity_mean: Option<i32>,
 }
 
 /// Parse an Open-Meteo forecast response that uses Celsius and km/h.
@@ -62,7 +67,7 @@ pub fn parse_open_meteo(bytes: &[u8]) -> Result<Forecast, Error> {
     let hour_times = string_array(hourly, "time")?;
     let hour_temps = number_array(hourly, "temperature_2m")?;
     let hour_codes = number_array(hourly, "weather_code")?;
-    let hour_pops = number_array(hourly, "precipitation_probability")?;
+    let hour_pops = optional_precip_array(hourly, "precipitation_probability", hour_times.len())?;
     let hour_is_day = number_array(hourly, "is_day")?;
     if hour_times.len() != hour_temps.len()
         || hour_times.len() != hour_codes.len()
@@ -77,6 +82,11 @@ pub fn parse_open_meteo(bytes: &[u8]) -> Result<Forecast, Error> {
     let day_max = number_array(daily, "temperature_2m_max")?;
     let day_min = number_array(daily, "temperature_2m_min")?;
     let day_pops = number_array(daily, "precipitation_probability_max")?;
+    let day_sums = optional_number_array(daily, "precipitation_sum", day_times.len());
+    let day_winds = optional_number_array(daily, "wind_speed_10m_max", day_times.len());
+    let day_sunrise = optional_string_array(daily, "sunrise", day_times.len());
+    let day_sunset = optional_string_array(daily, "sunset", day_times.len());
+    let day_humidity = optional_number_array(daily, "relative_humidity_2m_mean", day_times.len());
     if day_times.len() != day_codes.len()
         || day_times.len() != day_max.len()
         || day_times.len() != day_min.len()
@@ -92,30 +102,33 @@ pub fn parse_open_meteo(bytes: &[u8]) -> Result<Forecast, Error> {
         .zip(hour_pops)
         .zip(hour_is_day)
         .map(
-            |((((time, temperature_c), weather_code), precip), is_day)| Hour {
+            |((((time, temperature_c), weather_code), precip_probability), is_day)| Hour {
                 time,
                 temperature_c,
                 weather_code: round_code(weather_code),
-                precip_probability: round_code(precip),
+                precip_probability,
                 is_day: is_day != 0.0,
             },
         )
         .collect();
     let daily_rows = day_times
         .into_iter()
-        .zip(day_codes)
-        .zip(day_max)
-        .zip(day_min)
-        .zip(day_pops)
-        .map(
-            |((((date, weather_code), temp_max_c), temp_min_c), precip)| Day {
+        .enumerate()
+        .map(|(index, date)| {
+            let weather_code = round_code(day_codes[index]);
+            Day {
                 date,
-                weather_code: round_code(weather_code),
-                temp_max_c,
-                temp_min_c,
-                precip_probability: round_code(precip),
-            },
-        )
+                weather_code,
+                temp_max_c: day_max[index],
+                temp_min_c: day_min[index],
+                precip_probability: round_code(day_pops[index]),
+                precip_sum_mm: day_sums[index],
+                wind_max_kmh: day_winds[index],
+                sunrise: day_sunrise[index].clone(),
+                sunset: day_sunset[index].clone(),
+                humidity_mean: day_humidity[index].map(round_code),
+            }
+        })
         .collect();
 
     Ok(Forecast {
@@ -150,16 +163,20 @@ pub fn next_hours(forecast: &Forecast, count: usize) -> Vec<&Hour> {
 /// `4:45 PM` from an Open-Meteo local timestamp `2026-11-17T16:45`.
 #[must_use]
 pub fn format_as_of(time: &str) -> String {
-    let Some(hour) = clock_hour(time) else {
-        return time.to_string();
-    };
+    format_clock_time(time).unwrap_or_else(|| time.to_string())
+}
+
+/// `7:24 AM` from a local timestamp, or `None` when the string is not a clock time.
+#[must_use]
+pub fn format_clock_time(time: &str) -> Option<String> {
+    let hour = clock_hour(time)?;
     let minute = time.get(14..16).unwrap_or("00");
     let suffix = if hour >= 12 { "PM" } else { "AM" };
     let hour12 = match hour % 12 {
         0 => 12,
         value => value,
     };
-    format!("{hour12}:{minute} {suffix}")
+    Some(format!("{hour12}:{minute} {suffix}"))
 }
 
 /// `Now`, `5p`, or `12a`.
@@ -176,6 +193,18 @@ pub fn hour_label(time: &str, is_now: bool) -> String {
         12 => "12p".to_string(),
         1..=11 => format!("{hour}a"),
         _ => format!("{}p", hour.saturating_sub(12)),
+    }
+}
+
+/// Daily precipitation total for display.
+#[must_use]
+pub fn format_precip_amount_mm(mm: f64, fahrenheit: bool) -> String {
+    if fahrenheit {
+        let inches = crate::units::round_half_away_from_zero(mm / 25.4 * 100.0) as f64 / 100.0;
+        format!("{inches:.2} in")
+    } else {
+        let rounded = crate::units::round_half_away_from_zero(mm * 10.0) as f64 / 10.0;
+        format!("{rounded:.1} mm")
     }
 }
 
@@ -253,4 +282,183 @@ fn number_array(value: &Value, key: &str) -> Result<Vec<f64>, Error> {
                 .ok_or_else(|| Error::Parse(format!("bad {key}")))
         })
         .collect()
+}
+
+fn optional_precip_array(value: &Value, key: &str, len: usize) -> Result<Vec<Option<i32>>, Error> {
+    let Some(array) = value.get(key).and_then(Value::as_array) else {
+        return Ok(vec![None; len]);
+    };
+    if array.len() != len {
+        return Err(Error::Parse(format!("bad {key}")));
+    }
+    array
+        .iter()
+        .map(|item| {
+            if item.is_null() {
+                return Ok(None);
+            }
+            let value = item
+                .as_f64()
+                .ok_or_else(|| Error::Parse(format!("bad {key}")))?;
+            Ok(Some(round_code(value)))
+        })
+        .collect()
+}
+
+fn optional_number_array(value: &Value, key: &str, len: usize) -> Vec<Option<f64>> {
+    let Some(array) = value.get(key).and_then(Value::as_array) else {
+        return vec![None; len];
+    };
+    if array.len() != len {
+        return vec![None; len];
+    }
+    array
+        .iter()
+        .map(|item| {
+            if item.is_null() {
+                None
+            } else {
+                item.as_f64().filter(|value| value.is_finite())
+            }
+        })
+        .collect()
+}
+
+fn optional_string_array(value: &Value, key: &str, len: usize) -> Vec<Option<String>> {
+    let Some(array) = value.get(key).and_then(Value::as_array) else {
+        return vec![None; len];
+    };
+    if array.len() != len {
+        return vec![None; len];
+    }
+    array
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .filter(|text| !text.is_empty())
+                .map(ToOwned::to_owned)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hourly_precipitation_probability_handles_null_entries() {
+        let body = br#"{
+            "latitude": 0,
+            "longitude": 0,
+            "timezone": "UTC",
+            "current": {
+                "time": "2026-11-17T12:00",
+                "temperature_2m": 10,
+                "apparent_temperature": 10,
+                "relative_humidity_2m": 50,
+                "wind_speed_10m": 5,
+                "weather_code": 1,
+                "is_day": 1
+            },
+            "hourly": {
+                "time": ["2026-11-17T12:00", "2026-11-17T13:00"],
+                "temperature_2m": [10, 11],
+                "weather_code": [1, 1],
+                "precipitation_probability": [25, null],
+                "is_day": [1, 1]
+            },
+            "daily": {
+                "time": ["2026-11-17"],
+                "weather_code": [1],
+                "temperature_2m_max": [12],
+                "temperature_2m_min": [5],
+                "precipitation_probability_max": [10]
+            }
+        }"#;
+        let forecast = parse_open_meteo(body).expect("forecast");
+        assert_eq!(forecast.hourly[0].precip_probability, Some(25));
+        assert_eq!(forecast.hourly[1].precip_probability, None);
+    }
+
+    #[test]
+    fn daily_optional_fields_are_absent_when_missing() {
+        let body = br#"{
+            "latitude": 0,
+            "longitude": 0,
+            "timezone": "UTC",
+            "current": {
+                "time": "2026-11-17T12:00",
+                "temperature_2m": 10,
+                "apparent_temperature": 10,
+                "relative_humidity_2m": 50,
+                "wind_speed_10m": 5,
+                "weather_code": 1,
+                "is_day": 1
+            },
+            "hourly": {
+                "time": ["2026-11-17T12:00"],
+                "temperature_2m": [10],
+                "weather_code": [1],
+                "precipitation_probability": [0],
+                "is_day": [1]
+            },
+            "daily": {
+                "time": ["2026-11-17", "2026-11-18"],
+                "weather_code": [1, 2],
+                "temperature_2m_max": [12, 11],
+                "temperature_2m_min": [5, 4],
+                "precipitation_probability_max": [10, 20],
+                "sunrise": ["2026-11-17T07:12", null],
+                "wind_speed_10m_max": [18.2, null]
+            }
+        }"#;
+        let forecast = parse_open_meteo(body).expect("forecast");
+        let first = &forecast.daily[0];
+        assert_eq!(first.sunrise.as_deref(), Some("2026-11-17T07:12"));
+        assert_eq!(first.wind_max_kmh, Some(18.2));
+        assert_eq!(first.precip_sum_mm, None);
+        assert_eq!(forecast.daily[1].sunrise, None);
+        assert_eq!(forecast.daily[1].wind_max_kmh, None);
+        assert_eq!(first.humidity_mean, None);
+        assert_eq!(
+            format_clock_time(first.sunrise.as_deref().unwrap()),
+            Some("7:12 AM".into())
+        );
+    }
+
+    #[test]
+    fn daily_mean_humidity_rounds_and_missing_stays_none() {
+        let body = br#"{
+            "latitude": 0,
+            "longitude": 0,
+            "timezone": "UTC",
+            "current": {
+                "time": "2026-11-17T12:00",
+                "temperature_2m": 10,
+                "apparent_temperature": 10,
+                "relative_humidity_2m": 50,
+                "wind_speed_10m": 5,
+                "weather_code": 1,
+                "is_day": 1
+            },
+            "hourly": {
+                "time": ["2026-11-17T12:00"],
+                "temperature_2m": [10],
+                "weather_code": [1],
+                "precipitation_probability": [0],
+                "is_day": [1]
+            },
+            "daily": {
+                "time": ["2026-11-17", "2026-11-18"],
+                "weather_code": [1, 2],
+                "temperature_2m_max": [12, 11],
+                "temperature_2m_min": [5, 4],
+                "precipitation_probability_max": [10, 20],
+                "relative_humidity_2m_mean": [58.4, null]
+            }
+        }"#;
+        let forecast = parse_open_meteo(body).expect("forecast");
+        assert_eq!(forecast.daily[0].humidity_mean, Some(58));
+        assert_eq!(forecast.daily[1].humidity_mean, None);
+    }
 }

@@ -24,6 +24,8 @@ use crate::fl;
 const HOUR_COLUMN: f32 = 64.0;
 const CHART_HEIGHT: f32 = 64.0;
 const CHART_PAD: f32 = 8.0;
+/// Match web `.zoom-controls` 32px buttons.
+const MAP_CONTROL_SIZE: f32 = 32.0;
 const RANGE_TRACK: Color = Color::from_rgb(0.902, 0.910, 0.925);
 const RANGE_COOL: Color = Color::from_rgb(0.490, 0.827, 0.988);
 const RANGE_WARM: Color = Color::from_rgb(0.961, 0.620, 0.043);
@@ -422,6 +424,7 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
 
     let zoom_controls = widget::Column::new()
         .spacing(0)
+        .width(Length::Fixed(MAP_CONTROL_SIZE))
         .push(map_button(
             "list-add-symbolic",
             Message::ZoomIn,
@@ -446,16 +449,18 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
             expand_tip,
         ));
 
-    let plate = widget::container(zoom_controls).style(|theme| {
-        let cosmic = theme.cosmic();
-        let mut style = popup_fill(theme);
-        style.border = cosmic::iced::Border {
-            width: 1.0,
-            radius: cosmic.corner_radii.radius_s.into(),
-            color: style.border.color,
-        };
-        style
-    });
+    let plate = widget::container(zoom_controls)
+        .width(Length::Shrink)
+        .style(|theme| {
+            let cosmic = theme.cosmic();
+            let mut style = popup_fill(theme);
+            style.border = cosmic::iced::Border {
+                width: 1.0,
+                radius: cosmic.corner_radii.radius_s.into(),
+                color: style.border.color,
+            };
+            style
+        });
 
     let overlay = widget::container(plate)
         .width(Length::Fill)
@@ -829,6 +834,8 @@ fn map_button(icon: &'static str, message: Message, tip: String) -> Element<'sta
     widget::tooltip::tooltip(
         widget::button::icon(widget::icon::from_name(icon))
             .on_press(message)
+            .width(Length::Fixed(MAP_CONTROL_SIZE))
+            .height(Length::Fixed(MAP_CONTROL_SIZE))
             .padding(8)
             .class(map_control_button_class()),
         widget::text::body(tip),

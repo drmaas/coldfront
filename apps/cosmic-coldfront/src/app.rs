@@ -208,7 +208,7 @@ impl cosmic::Application for AppModel {
             weather_loading: false,
             refresh_failed: false,
             map_error: None,
-            selected_forecast_day: Some(0),
+            selected_forecast_day: None,
             active_tab,
             tile_cache: TileCache::default(),
             map_handle: None,
@@ -429,7 +429,7 @@ impl cosmic::Application for AppModel {
                 self.weather_loading = false;
                 self.refresh_failed = false;
                 self.map_error = None;
-                self.selected_forecast_day = Some(0);
+                self.selected_forecast_day = None;
                 if self.active_tab == PopupTab::Radar || self.radar_opened {
                     let clear_cache = place_changed || self.map_handle.is_none();
                     return self.reload_map(clear_cache);
@@ -511,7 +511,11 @@ impl cosmic::Application for AppModel {
                     .as_ref()
                     .is_some_and(|forecast| index < forecast.daily.len())
                 {
-                    self.selected_forecast_day = Some(index);
+                    self.selected_forecast_day = if self.selected_forecast_day == Some(index) {
+                        None
+                    } else {
+                        Some(index)
+                    };
                 }
             }
         }

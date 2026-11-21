@@ -24,6 +24,8 @@ use crate::fl;
 const HOUR_COLUMN: f32 = 64.0;
 const CHART_HEIGHT: f32 = 64.0;
 const CHART_PAD: f32 = 8.0;
+/// Match web `.zoom-controls` 32px buttons.
+const MAP_CONTROL_SIZE: f32 = 32.0;
 const RANGE_TRACK: Color = Color::from_rgb(0.902, 0.910, 0.925);
 const RANGE_COOL: Color = Color::from_rgb(0.490, 0.827, 0.988);
 const RANGE_WARM: Color = Color::from_rgb(0.961, 0.620, 0.043);
@@ -421,29 +423,46 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
     };
 
     let zoom_controls = widget::Column::new()
-        .spacing(spacing.space_xxs)
+        .spacing(0)
+        .width(Length::Fixed(MAP_CONTROL_SIZE))
         .push(map_button(
             "list-add-symbolic",
             Message::ZoomIn,
             fl!("tooltip-zoom-in"),
         ))
+        .push(widget::divider::horizontal::default())
         .push(map_button(
             "list-remove-symbolic",
             Message::ZoomOut,
             fl!("tooltip-zoom-out"),
         ))
+        .push(widget::divider::horizontal::default())
         .push(map_button(
             "find-location-symbolic",
             Message::Recenter,
             fl!("tooltip-recenter"),
         ))
+        .push(widget::divider::horizontal::default())
         .push(map_button(
             expand_icon,
             Message::ToggleRadarExpand,
             expand_tip,
         ));
 
-    let overlay = widget::container(zoom_controls)
+    let plate = widget::container(zoom_controls)
+        .width(Length::Shrink)
+        .style(|theme| {
+            let cosmic = theme.cosmic();
+            let mut style = popup_fill(theme);
+            style.border = cosmic::iced::Border {
+                width: 1.0,
+                radius: cosmic.corner_radii.radius_s.into(),
+                color: style.border.color,
+            };
+            style
+        });
+
+    let overlay = widget::container(plate)
         .width(Length::Fill)
         .height(Length::Fill)
         .align_x(cosmic::iced::alignment::Horizontal::Right)
@@ -618,14 +637,14 @@ fn forecast_tab(app: &AppModel) -> Element<'_, Message> {
     let scale_min = lows.iter().copied().fold(f64::INFINITY, f64::min);
     let scale_max = highs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
 
-    let selected = app.selected_forecast_day.unwrap_or(0);
+    let selected = app.selected_forecast_day;
     let mut col = widget::Column::new().spacing(spacing.space_xxs);
     for (index, day) in forecast.daily.iter().enumerate() {
         let info = describe(day.weather_code);
         let low = lows[index] as i32;
         let high = highs[index] as i32;
         let bar = range_placement(lows[index], highs[index], scale_min, scale_max);
-        let is_selected = selected == index;
+        let is_selected = selected == Some(index);
         let row = widget::Row::new()
             .spacing(spacing.space_xs)
             .align_y(Alignment::Center)
@@ -672,14 +691,27 @@ fn forecast_tab(app: &AppModel) -> Element<'_, Message> {
             .class(cosmic::theme::Button::Text)
             .on_press(Message::SelectForecastDay(index));
         col = col.push(button);
-    }
-    col = col.push(widget::divider::horizontal::default());
-    if let Some(day) = forecast.daily.get(selected) {
-        col = col.push(day_details_panel(
-            day,
-            &day_label(&day.date, &today),
-            app.config.fahrenheit,
-        ));
+        if is_selected {
+            col = col.push(
+                widget::container(day_details_panel(
+                    day,
+                    &day_label(&day.date, &today),
+                    app.config.fahrenheit,
+                ))
+                .padding([spacing.space_xs, spacing.space_s])
+                .width(Length::Fill)
+                .style(|theme| {
+                    let cosmic = theme.cosmic();
+                    let mut style = popup_fill(theme);
+                    style.border = cosmic::iced::Border {
+                        width: 1.0,
+                        radius: cosmic.corner_radii.radius_s.into(),
+                        color: style.border.color,
+                    };
+                    style
+                }),
+            );
+        }
     }
     col.into()
 }
@@ -802,12 +834,49 @@ fn map_button(icon: &'static str, message: Message, tip: String) -> Element<'sta
     widget::tooltip::tooltip(
         widget::button::icon(widget::icon::from_name(icon))
             .on_press(message)
-            .padding(6),
+            .width(Length::Fixed(MAP_CONTROL_SIZE))
+            .height(Length::Fixed(MAP_CONTROL_SIZE))
+            .padding(8)
+            .class(map_control_button_class()),
         widget::text::body(tip),
         widget::tooltip::Position::Left,
     )
     .gap(4)
     .into()
+}
+
+fn map_control_button_class() -> cosmic::theme::Button {
+    cosmic::theme::Button::Custom {
+        active: Box::new(|focused, theme| map_control_style(theme, focused, false)),
+        disabled: Box::new(|theme| map_control_style(theme, false, true)),
+        hovered: Box::new(|focused, theme| map_control_style(theme, focused, false)),
+        pressed: Box::new(|focused, theme| map_control_style(theme, focused, false)),
+    }
+}
+
+fn map_control_style(
+    theme: &cosmic::Theme,
+    focused: bool,
+    disabled: bool,
+) -> cosmic::widget::button::Style {
+    let cosmic = theme.cosmic();
+    let surface = cosmic.background(false);
+    let mut on = Color::from(surface.on);
+    if disabled {
+        on.a *= 0.5;
+    }
+    let mut style = cosmic::widget::button::Style::new();
+    style.background = Some(Color::TRANSPARENT.into());
+    style.icon_color = Some(on);
+    style.text_color = Some(on);
+    style.border_radius = cosmic.corner_radii.radius_0.into();
+    if focused {
+        style.outline_width = 1.0;
+        style.outline_color = cosmic.accent_color().into();
+        style.border_width = 2.0;
+        style.border_color = Color::TRANSPARENT;
+    }
+    style
 }
 
 fn map_placeholder(label: String, width: u32, height: u32) -> Element<'static, Message> {

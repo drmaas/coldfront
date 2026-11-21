@@ -199,9 +199,9 @@ interface ForecastData {
 
 function ForecastBody({ data, units }: { data: ForecastData; units: Units }) {
   const fahrenheit = units === "F";
-  const [selectedDay, setSelectedDay] = useState(0);
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const { forecast, place } = data;
-  useEffect(() => setSelectedDay(0), [forecast.current.time]);
+  useEffect(() => setSelectedDay(null), [forecast.current.time]);
   const hours = useMemo(() => nextHours(forecast, 24), [forecast]);
   const today = forecast.current.time.slice(0, 10);
   const temps = hours.map((hour) => displayTemperature(hour.temperatureC, fahrenheit));
@@ -307,7 +307,7 @@ function ForecastBody({ data, units }: { data: ForecastData; units: Units }) {
                 <button
                   type="button"
                   className={`day-row${selected ? " selected" : ""}`}
-                  onClick={() => setSelectedDay(index)}
+                  onClick={() => setSelectedDay((current) => (current === index ? null : index))}
                   {...dayRowButtonA11y(selected)}
                 >
                   <span className="day-name">{dayLabel(day.date, today)}</span>
@@ -323,17 +323,17 @@ function ForecastBody({ data, units }: { data: ForecastData; units: Units }) {
                   </span>
                   <span className="day-temp high">{high}°</span>
                 </button>
+                {selected ? (
+                  <DayDetails
+                    day={day}
+                    dayTitle={dayLabel(day.date, today)}
+                    fahrenheit={fahrenheit}
+                  />
+                ) : null}
               </li>
             );
           })}
         </ol>
-        {forecast.daily[selectedDay] ? (
-          <DayDetails
-            day={forecast.daily[selectedDay]}
-            dayTitle={dayLabel(forecast.daily[selectedDay].date, today)}
-            fahrenheit={fahrenheit}
-          />
-        ) : null}
       </section>
       <RadarMap latitude={place.latitude} longitude={place.longitude} basemap={data.basemap} />
     </div>

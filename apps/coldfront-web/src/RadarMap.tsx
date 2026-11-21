@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { iemTileUrl, webRadarFrames } from "../lib/domain";
 import { RadarRelief } from "./RadarRelief";
+import { pinchTargetZoom, pointerCenter, pointerSpan, RADAR_STAGE_GESTURE } from "./radarGestures";
 import { denoiseRadar, echoGrid, sampleEchoes, webgl2Available, type EchoSample } from "./radarRelief";
 
 interface RadarMapProps {
@@ -152,6 +153,146 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
   }, []);
 
   useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return undefined;
+
+    type Point = { x: number; y: number };
+    const pointers = new Map<number, Point>();
+    let pinch:
+      | {
+          startSpan: number;
+          startZoom: number;
+          startPan: { x: number; y: number };
+          originX: number;
+          originY: number;
+        }
+      | null = null;
+
+    const pointerValues = (): Point[] => [...pointers.values()];
+
+    const blockedTarget = (event: PointerEvent) =>
+      (event.target as Element | null)?.closest?.(".zoom-controls, button, input, a");
+
+    const flushPanZoom = () => {
+      setZoom(zoomRef.current);
+      setPan(panRef.current);
+    };
+
+    const beginPinch = () => {
+      const pts = pointerValues();
+      if (pts.length < 2) return;
+      const rect = stage.getBoundingClientRect();
+      const center = pointerCenter(pts[0], pts[1]);
+      drag.current = null;
+      pinch = {
+        startSpan: pointerSpan(pts[0], pts[1]),
+        startZoom: zoomRef.current,
+        startPan: { ...panRef.current },
+        originX: center.x - rect.left,
+        originY: center.y - rect.top,
+      };
+    };
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0 || event.shiftKey) return;
+      if (blockedTarget(event)) return;
+      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      try {
+        stage.setPointerCapture(event.pointerId);
+      } catch {
+        // Some browsers reject capture on unsupported targets.
+      }
+      if (pointers.size === 1) {
+        pinch = null;
+        drag.current = { x: event.clientX, y: event.clientY, panX: panRef.current.x, panY: panRef.current.y };
+      } else if (pointers.size === 2) {
+        beginPinch();
+      }
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      if (!pointers.has(event.pointerId)) return;
+      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+      if (pointers.size >= 2) {
+        if (!pinch) beginPinch();
+        const active = pinch;
+        if (!active || active.startSpan <= 0) return;
+        event.preventDefault();
+        const pts = pointerValues();
+        if (pts.length < 2) return;
+        const span = pointerSpan(pts[0], pts[1]);
+        const targetZoom = pinchTargetZoom(
+          active.startZoom,
+          active.startSpan,
+          span,
+          MIN_ZOOM,
+          MAX_ZOOM,
+        );
+        const next = zoomToward(
+          active.startZoom,
+          targetZoom,
+          active.originX,
+          active.originY,
+          stage.clientWidth,
+          stage.clientHeight,
+          active.startPan,
+        );
+        zoomRef.current = next.zoom;
+        panRef.current = next.pan;
+        flushPanZoom();
+        return;
+      }
+
+      const start = drag.current;
+      if (!start) return;
+      panRef.current = {
+        x: start.panX + event.clientX - start.x,
+        y: start.panY + event.clientY - start.y,
+      };
+      flushPanZoom();
+    };
+
+    const endPointer = (event: PointerEvent) => {
+      if (!pointers.has(event.pointerId)) return;
+      pointers.delete(event.pointerId);
+      try {
+        if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId);
+      } catch {
+        // Ignore release failures.
+      }
+      if (pointers.size < 2) {
+        pinch = null;
+      }
+      if (pointers.size === 0) {
+        drag.current = null;
+      } else if (pointers.size === 1) {
+        const remaining = pointerValues()[0];
+        drag.current = {
+          x: remaining.x,
+          y: remaining.y,
+          panX: panRef.current.x,
+          panY: panRef.current.y,
+        };
+      }
+    };
+
+    stage.addEventListener("pointerdown", onPointerDown);
+    stage.addEventListener("pointermove", onPointerMove, { passive: false });
+    stage.addEventListener("pointerup", endPointer);
+    stage.addEventListener("pointercancel", endPointer);
+    return () => {
+      stage.removeEventListener("pointerdown", onPointerDown);
+      stage.removeEventListener("pointermove", onPointerMove);
+      stage.removeEventListener("pointerup", endPointer);
+      stage.removeEventListener("pointercancel", endPointer);
+      pointers.clear();
+      pinch = null;
+      drag.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
     let cancelled = false;
@@ -242,22 +383,9 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
       <div
         ref={stageRef}
         className="radar-stage"
-        onPointerDown={(event) => {
-          if (event.button !== 0 || event.shiftKey) return;
-          if ((event.target as Element | null)?.closest?.(".zoom-controls, button, input, a")) return;
-          drag.current = { x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
-          event.currentTarget.setPointerCapture(event.pointerId);
-        }}
-        onPointerMove={(event) => {
-          const start = drag.current;
-          if (!start) return;
-          setPan({ x: start.panX + event.clientX - start.x, y: start.panY + event.clientY - start.y });
-        }}
-        onPointerUp={() => {
-          drag.current = null;
-        }}
-        onPointerCancel={() => {
-          drag.current = null;
+        style={{
+          touchAction: RADAR_STAGE_GESTURE.touchAction,
+          overscrollBehavior: RADAR_STAGE_GESTURE.overscrollBehavior,
         }}
       >
         <canvas

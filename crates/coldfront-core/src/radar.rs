@@ -228,6 +228,167 @@ pub struct MapCamera {
     pub margin: u32,
 }
 
+/// Continuous camera used while the applet pans and zooms.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GestureCamera {
+    pub zoom: f64,
+    pub pan_x: f64,
+    pub pan_y: f64,
+}
+
+/// Affine map from a settled radar bitmap to the live camera.
+///
+/// `sx_live = scale * sx_settled + tx` in CSS / logical pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SnapshotTransform {
+    pub scale: f64,
+    pub tx: f64,
+    pub ty: f64,
+}
+
+/// Integer tile camera derived from a continuous gesture camera.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TileCamera {
+    pub zoom: u32,
+    pub pan_x: f64,
+    pub pan_y: f64,
+    pub view_width: u32,
+    pub view_height: u32,
+    /// Scale from tile pixels to logical view pixels: `2^(zoom - floor(zoom))`.
+    pub scale: f64,
+}
+
+/// Affine map from a settled radar bitmap to the live camera.
+#[must_use]
+pub fn snapshot_transform(
+    settled: GestureCamera,
+    live: GestureCamera,
+    width: f64,
+    height: f64,
+) -> SnapshotTransform {
+    let scale = 2f64.powf(live.zoom - settled.zoom);
+    SnapshotTransform {
+        scale,
+        tx: width / 2.0 + live.pan_x - scale * (width / 2.0 + settled.pan_x),
+        ty: height / 2.0 + live.pan_y - scale * (height / 2.0 + settled.pan_y),
+    }
+}
+
+/// Zoom toward a screen origin, keeping that point fixed in the view.
+#[must_use]
+pub fn zoom_toward(
+    camera: GestureCamera,
+    next_zoom: f64,
+    origin_x: f64,
+    origin_y: f64,
+    width: f64,
+    height: f64,
+) -> GestureCamera {
+    let zoom = next_zoom.clamp(f64::from(APPLET_ZOOM_MIN), f64::from(APPLET_ZOOM_MAX));
+    if (zoom - camera.zoom).abs() < f64::EPSILON {
+        return GestureCamera {
+            zoom,
+            pan_x: camera.pan_x,
+            pan_y: camera.pan_y,
+        };
+    }
+    let factor = 2f64.powf(zoom - camera.zoom);
+    GestureCamera {
+        zoom,
+        pan_x: factor * (width / 2.0 + camera.pan_x - origin_x) - width / 2.0 + origin_x,
+        pan_y: factor * (height / 2.0 + camera.pan_y - origin_y) - height / 2.0 + origin_y,
+    }
+}
+
+/// Map a continuous zoom onto the integer [`map_viewport`] camera.
+#[must_use]
+pub fn tile_camera(
+    zoom: f64,
+    pan_x: f64,
+    pan_y: f64,
+    view_width: u32,
+    view_height: u32,
+) -> TileCamera {
+    let zoom = zoom.clamp(f64::from(APPLET_ZOOM_MIN), f64::from(APPLET_ZOOM_MAX));
+    let tile_zoom = zoom.floor() as u32;
+    let tile_zoom = tile_zoom.clamp(APPLET_ZOOM_MIN, APPLET_ZOOM_MAX);
+    let scale = 2f64.powf(zoom - f64::from(tile_zoom));
+    let view_width = ((f64::from(view_width.max(1)) / scale).round() as u32).max(1);
+    let view_height = ((f64::from(view_height.max(1)) / scale).round() as u32).max(1);
+    TileCamera {
+        zoom: tile_zoom,
+        pan_x: pan_x / scale,
+        pan_y: pan_y / scale,
+        view_width,
+        view_height,
+        scale,
+    }
+}
+
+/// Mercator unit coordinates for a latitude and longitude (zoom-independent).
+#[must_use]
+pub fn pin_mercator(latitude: f64, longitude: f64) -> (f64, f64) {
+    let mx = (longitude + 180.0) / 360.0;
+    let lat_rad = latitude.to_radians();
+    let my = (1.0 - (lat_rad.tan() + 1.0 / lat_rad.cos()).ln() / std::f64::consts::PI) / 2.0;
+    (mx, my)
+}
+
+/// Screen point for a mercator location under a continuous camera.
+#[must_use]
+pub fn world_to_screen(
+    latitude: f64,
+    longitude: f64,
+    camera: GestureCamera,
+    width: f64,
+    height: f64,
+    mx: f64,
+    my: f64,
+) -> (f64, f64) {
+    let (pin_x, pin_y) = pin_mercator(latitude, longitude);
+    (
+        (mx - pin_x) * f64::from(TILE_SIZE) * 2f64.powf(camera.zoom) + width / 2.0 + camera.pan_x,
+        (my - pin_y) * f64::from(TILE_SIZE) * 2f64.powf(camera.zoom) + height / 2.0 + camera.pan_y,
+    )
+}
+
+/// Resize a raster to `width` by `height`.
+///
+/// Scale near 1.0 uses nearest neighbor so integer zooms stay sharp.
+#[must_use]
+pub fn scale_raster(source: &Raster, width: u32, height: u32) -> Raster {
+    let width = width.max(1);
+    let height = height.max(1);
+    if source.width == width && source.height == height {
+        return source.clone();
+    }
+    let Some(image) = RgbaImage::from_raw(source.width, source.height, source.pixels.clone())
+    else {
+        return Raster {
+            width,
+            height,
+            pixels: vec![0; (width * height * 4) as usize],
+        };
+    };
+    let sx = f64::from(width) / f64::from(source.width.max(1));
+    let sy = f64::from(height) / f64::from(source.height.max(1));
+    let integer_scale = (sx - sx.round()).abs() < 0.001
+        && (sy - sy.round()).abs() < 0.001
+        && sx >= 1.0
+        && sy >= 1.0;
+    let filter = if integer_scale {
+        imageops::FilterType::Nearest
+    } else {
+        imageops::FilterType::Triangle
+    };
+    let resized = imageops::resize(&image, width, height, filter);
+    Raster {
+        width: resized.width(),
+        height: resized.height(),
+        pixels: resized.into_raw(),
+    }
+}
+
 /// Tile grid covering a panned/zoomed view, with a one-tile margin by default.
 ///
 /// `pan_x`/`pan_y` are screen pixels: positive values move the map content
@@ -516,8 +677,9 @@ fn draw_disc(image: &mut RgbaImage, cx: i32, cy: i32, radius: i32, color: Rgba<u
 #[cfg(test)]
 mod tests {
     use super::{
-        APPLET_ZOOM_MAX, APPLET_ZOOM_MIN, MAP_DISPLAY_HEIGHT, MAP_DISPLAY_WIDTH, MapCamera,
-        TileWindow, compose_radar_map, compose_viewport, map_viewport, radar_layer,
+        APPLET_ZOOM_MAX, APPLET_ZOOM_MIN, GestureCamera, MAP_DISPLAY_HEIGHT, MAP_DISPLAY_WIDTH,
+        MapCamera, TileWindow, compose_radar_map, compose_viewport, map_viewport, pin_mercator,
+        radar_layer, snapshot_transform, world_to_screen, zoom_toward,
     };
     use image::{ExtendedColorType, ImageEncoder, Rgba, RgbaImage, codecs::png::PngEncoder};
     use jiff::Timestamp;
@@ -659,6 +821,74 @@ mod tests {
             (view.pin_y - 8).clamp(0, 149) as u32,
         );
         assert!(pin[0] > 180, "pin red channel {}", pin[0]);
+    }
+
+    #[test]
+    fn snapshot_transform_maps_settled_point_to_live() {
+        let latitude = 41.6;
+        let longitude = -93.6;
+        let width = 400.0;
+        let height = 280.0;
+        let settled = GestureCamera {
+            zoom: 6.25,
+            pan_x: 40.0,
+            pan_y: -20.0,
+        };
+        let live = GestureCamera {
+            zoom: 7.1,
+            pan_x: -15.0,
+            pan_y: 30.0,
+        };
+        let sx = 120.0;
+        let sy = 90.0;
+        let (pin_x, pin_y) = pin_mercator(latitude, longitude);
+        // Invert settled screen → world using continuous mercator.
+        let tiles = 2f64.powf(settled.zoom);
+        let mx = pin_x + (sx - width / 2.0 - settled.pan_x) / (256.0 * tiles);
+        let my = pin_y + (sy - height / 2.0 - settled.pan_y) / (256.0 * tiles);
+        let (expected_x, expected_y) =
+            world_to_screen(latitude, longitude, live, width, height, mx, my);
+        let xform = snapshot_transform(settled, live, width, height);
+        let mapped_x = xform.scale * sx + xform.tx;
+        let mapped_y = xform.scale * sy + xform.ty;
+        assert!((mapped_x - expected_x).abs() < 1e-6);
+        assert!((mapped_y - expected_y).abs() < 1e-6);
+    }
+
+    #[test]
+    fn snapshot_transform_is_identity_when_cameras_match() {
+        let camera = GestureCamera {
+            zoom: 6.0,
+            pan_x: 12.0,
+            pan_y: -8.0,
+        };
+        let xform = snapshot_transform(camera, camera, 320.0, 240.0);
+        assert!((xform.scale - 1.0).abs() < 1e-12);
+        assert!(xform.tx.abs() < 1e-10);
+        assert!(xform.ty.abs() < 1e-10);
+    }
+
+    #[test]
+    fn zoom_toward_keeps_origin_fixed() {
+        let latitude = 35.1;
+        let longitude = -106.6;
+        let width = 500.0;
+        let height = 300.0;
+        let origin_x = 200.0;
+        let origin_y = 100.0;
+        let before = GestureCamera {
+            zoom: 6.0,
+            pan_x: 0.0,
+            pan_y: 0.0,
+        };
+        let after = zoom_toward(before, 7.0, origin_x, origin_y, width, height);
+        let (pin_x, pin_y) = pin_mercator(latitude, longitude);
+        let mx = pin_x + (origin_x - width / 2.0 - before.pan_x) / (256.0 * 2f64.powf(before.zoom));
+        let my =
+            pin_y + (origin_y - height / 2.0 - before.pan_y) / (256.0 * 2f64.powf(before.zoom));
+        let (sx, sy) = world_to_screen(latitude, longitude, after, width, height, mx, my);
+        assert!((sx - origin_x).abs() < 1e-6);
+        assert!((sy - origin_y).abs() < 1e-6);
     }
 
     fn pixel(pixels: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {

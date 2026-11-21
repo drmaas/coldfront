@@ -6,16 +6,17 @@ use std::borrow::Cow;
 
 use cosmic::iced::mouse;
 use cosmic::iced::widget::canvas::{self, Fill, Geometry, Path, Stroke, Style};
+use cosmic::iced::widget::image::FilterMethod;
 use cosmic::iced::widget::scrollable::{Direction as ScrollDir, Scrollbar};
-use cosmic::iced::{Alignment, Color, Length, Point, Rectangle, Renderer};
+use cosmic::iced::{Alignment, Color, Length, Point, Rectangle, Renderer, Size, Vector};
 use cosmic::prelude::*;
 use cosmic::widget;
 use cosmic::widget::svg;
 
 use coldfront_core::{
-    Day, chart_points, day_label, describe, display_icon, display_temperature, display_wind_mph,
-    format_as_of, format_clock_time, format_precip_amount_mm, hour_label, is_us_zip, next_hours,
-    range_placement,
+    Day, SnapshotTransform, chart_points, day_label, describe, display_icon, display_temperature,
+    display_wind_mph, format_as_of, format_clock_time, format_precip_amount_mm, hour_label,
+    is_us_zip, next_hours, range_placement,
 };
 
 use crate::app::{AppModel, Message, PopupTab};
@@ -29,6 +30,8 @@ const MAP_CONTROL_SIZE: f32 = 32.0;
 const RANGE_TRACK: Color = Color::from_rgb(0.902, 0.910, 0.925);
 const RANGE_COOL: Color = Color::from_rgb(0.490, 0.827, 0.988);
 const RANGE_WARM: Color = Color::from_rgb(0.961, 0.620, 0.043);
+/// Match the pale radar fill `#d5e3ec`.
+const RADAR_STAGE: Color = Color::from_rgb(213.0 / 255.0, 227.0 / 255.0, 236.0 / 255.0);
 
 /// Panel temperature type role by panel size tier (matches Tempest).
 fn panel_text(size: cosmic::applet::Size, label: String) -> Element<'static, Message> {
@@ -390,7 +393,14 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
     let (width, height) = app.map_size();
     let map: Element<'_, Message> = if let Some(handle) = &app.map_handle {
-        widget::image(handle.clone())
+        let (settled_w, settled_h) = app.settled_map_size();
+        let stage = RadarStage {
+            handle: handle.clone(),
+            transform: app.board_transform(),
+            settled_width: settled_w as f32,
+            settled_height: settled_h as f32,
+        };
+        widget::canvas(stage)
             .width(Length::Fixed(width as f32))
             .height(Length::Fixed(height as f32))
             .into()
@@ -1009,6 +1019,50 @@ fn weather_icon_svg(name: &str) -> String {
     }
     parts.push_str("</svg>");
     parts
+}
+
+/// Draws the last settled radar snapshot with the live pan/zoom affine.
+struct RadarStage {
+    handle: cosmic::iced::widget::image::Handle,
+    transform: SnapshotTransform,
+    settled_width: f32,
+    settled_height: f32,
+}
+
+impl canvas::Program<Message, cosmic::Theme> for RadarStage {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        _theme: &cosmic::Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        frame.fill_rectangle(Point::ORIGIN, bounds.size(), RADAR_STAGE);
+        let scale = self.transform.scale as f32;
+        let tx = self.transform.tx as f32;
+        let ty = self.transform.ty as f32;
+        frame.with_save(|frame| {
+            frame.translate(Vector::new(tx, ty));
+            frame.scale(scale);
+            let filter = if (self.transform.scale - 1.0).abs() > 0.001 {
+                FilterMethod::Linear
+            } else {
+                FilterMethod::Nearest
+            };
+            frame.draw_image(
+                Rectangle::new(
+                    Point::ORIGIN,
+                    Size::new(self.settled_width, self.settled_height),
+                ),
+                canvas::Image::new(&self.handle).filter_method(filter),
+            );
+        });
+        vec![frame.into_geometry()]
+    }
 }
 
 struct HourlyChart {

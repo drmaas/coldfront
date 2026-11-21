@@ -15,17 +15,16 @@ use cosmic::widget;
 use cosmic::widget::segmented_button;
 
 use coldfront_core::{
-    APPLET_ZOOM_MAX, APPLET_ZOOM_MIN, Alert, EchoField, Forecast, HttpClient, Place, Raster,
-    ReliefCamera, applet_radar_frames, build_echo_field, clamp_relief_pitch, default_relief_camera,
-    denoise_radar, describe, display_icon, display_temperature, echo_grid, is_us_zip,
-    render_relief, sample_echoes, symbolic_icon,
+    Alert, EchoField, Forecast, GestureCamera, HttpClient, Place, Raster, ReliefCamera,
+    SnapshotTransform, applet_radar_frames, build_echo_field, clamp_relief_pitch,
+    default_relief_camera, describe, display_icon, display_temperature, echo_grid, is_us_zip,
+    render_relief, sample_echoes, snapshot_transform, symbolic_icon, zoom_toward,
 };
 
 use crate::config::{self, Config};
 use crate::fl;
 use crate::mapload::{
     self, BasemapKind, LoadedFrame, MAP_VIEW_HEIGHT, MAP_VIEW_WIDTH, TileCache, WeatherBundle,
-    viewport_for,
 };
 use crate::view;
 
@@ -85,9 +84,17 @@ pub struct AppModel {
     pub(crate) radar_tiles: usize,
     pub(crate) shown_offset: u32,
     pub(crate) playing: bool,
-    pub(crate) zoom: u32,
+    pub(crate) zoom: f64,
     pub(crate) pan_x: f64,
     pub(crate) pan_y: f64,
+    /// Camera of the last presented snapshot (for gesture blit).
+    settled_zoom: f64,
+    settled_pan_x: f64,
+    settled_pan_y: f64,
+    settled_width: u32,
+    settled_height: u32,
+    pixel_ratio: f64,
+    gesturing: bool,
     pending_offsets: Vec<u32>,
     frames_ready: Vec<u32>,
     drag: Option<DragState>,
@@ -158,6 +165,10 @@ pub enum Message {
     MapMove(Point),
     MapScroll(ScrollDelta),
     MapSettle(u64),
+    PrefetchDone {
+        cache: Box<TileCache>,
+    },
+    ScaleFactor(f64),
     Modifiers(Modifiers),
     WeatherReady(Box<WeatherLoaded>),
     WeatherFailed {
@@ -166,7 +177,7 @@ pub enum Message {
     },
     MapReady {
         generation: u64,
-        zoom: u32,
+        zoom: f64,
         pan_x: f64,
         pan_y: f64,
         frame: Box<LoadedFrame>,
@@ -175,7 +186,7 @@ pub enum Message {
     },
     OlderFrame {
         generation: u64,
-        zoom: u32,
+        zoom: f64,
         pan_x: f64,
         pan_y: f64,
         offset_minutes: u32,
@@ -242,9 +253,16 @@ impl cosmic::Application for AppModel {
             radar_tiles: 0,
             shown_offset: 0,
             playing: true,
-            zoom: 7,
+            zoom: 7.0,
             pan_x: 0.0,
             pan_y: 0.0,
+            settled_zoom: 7.0,
+            settled_pan_x: 0.0,
+            settled_pan_y: 0.0,
+            settled_width: MAP_VIEW_WIDTH,
+            settled_height: MAP_VIEW_HEIGHT,
+            pixel_ratio: 1.0,
+            gesturing: false,
             pending_offsets: Vec::new(),
             frames_ready: Vec::new(),
             drag: None,
@@ -295,6 +313,9 @@ impl cosmic::Application for AppModel {
                 Event::Mouse(cosmic::iced::mouse::Event::ButtonReleased(MouseButton::Left))
                 | Event::Mouse(cosmic::iced::mouse::Event::ButtonReleased(MouseButton::Right)) => {
                     Some(Message::MapRelease)
+                }
+                Event::Window(window::Event::Rescaled(scale)) => {
+                    Some(Message::ScaleFactor(f64::from(scale)))
                 }
                 _ => None,
             }),
@@ -400,18 +421,21 @@ impl cosmic::Application for AppModel {
                 self.playing = false;
                 if let Some(offset) = frame_offset_at(index as usize) {
                     self.shown_offset = offset;
-                    self.recompose_current();
+                    if self.gesturing {
+                        return self.schedule_settle();
+                    }
+                    return self.settle_now();
                 }
             }
-            Message::AdvanceRadar => self.advance_radar(),
-            Message::ZoomIn => return self.set_zoom(self.zoom.saturating_add(1)),
-            Message::ZoomOut => return self.set_zoom(self.zoom.saturating_sub(1)),
+            Message::AdvanceRadar => return self.advance_radar(),
+            Message::ZoomIn => return self.nudge_zoom(1.0),
+            Message::ZoomOut => return self.nudge_zoom(-1.0),
             Message::Recenter => {
                 self.pan_x = 0.0;
                 self.pan_y = 0.0;
                 let (view_width, view_height) = self.map_size();
                 self.relief_camera = default_relief_camera(view_width, view_height);
-                self.recompose_current();
+                self.gesturing = true;
                 return self.schedule_settle();
             }
             Message::ToggleRadarMode => {
@@ -423,7 +447,10 @@ impl cosmic::Application for AppModel {
                     let (view_width, view_height) = self.map_size();
                     self.relief_camera = default_relief_camera(view_width, view_height);
                 }
-                self.recompose_current();
+                if self.gesturing {
+                    return self.schedule_settle();
+                }
+                return self.settle_now();
             }
             Message::ToggleRadarExpand => {
                 if self.radar_expanded {
@@ -454,9 +481,13 @@ impl cosmic::Application for AppModel {
             }
             Message::MapRelease => {
                 let was_pan = matches!(self.drag, Some(DragState::Pan { .. }));
+                let was_orbit = matches!(self.drag, Some(DragState::Orbit { .. }));
                 self.drag = None;
                 if was_pan {
                     return self.schedule_settle();
+                }
+                if was_orbit {
+                    self.present_current_snapshot();
                 }
             }
             Message::MapLeave => {
@@ -478,7 +509,7 @@ impl cosmic::Application for AppModel {
                     }) => {
                         self.pan_x = pan_x + f64::from(point.x - start.x);
                         self.pan_y = pan_y + f64::from(point.y - start.y);
-                        self.recompose_current();
+                        self.gesturing = true;
                     }
                     Some(DragState::Orbit { start, yaw, pitch }) => {
                         self.relief_camera.yaw = yaw + (point.x - start.x) * 0.005;
@@ -492,7 +523,20 @@ impl cosmic::Application for AppModel {
             Message::MapScroll(delta) => return self.handle_scroll(delta),
             Message::MapSettle(token) => {
                 if token == self.settle_token {
+                    self.gesturing = false;
                     return self.refresh_visible_map();
+                }
+            }
+            Message::PrefetchDone { cache } => {
+                self.tile_cache.absorb(&cache);
+            }
+            Message::ScaleFactor(scale) => {
+                let next = scale.clamp(1.0, 2.0);
+                if (next - self.pixel_ratio).abs() > 0.01 {
+                    self.pixel_ratio = next;
+                    if self.map_handle.is_some() && !self.gesturing {
+                        return self.settle_now();
+                    }
                 }
             }
             Message::Modifiers(modifiers) => {
@@ -548,8 +592,16 @@ impl cosmic::Application for AppModel {
                 }
                 self.map_loading = false;
                 self.pending_offsets = pending;
-                self.apply_frame(*frame, zoom, pan_x, pan_y);
-                return self.load_next_frame();
+                let presented = self.apply_frame(*frame, zoom, pan_x, pan_y);
+                let next = self.load_next_frame();
+                if presented {
+                    let prefetch = self.schedule_prefetch();
+                    return Task::batch([next, prefetch]);
+                }
+                if !self.camera_matches(zoom, pan_x, pan_y) {
+                    return Task::batch([next, self.schedule_settle()]);
+                }
+                return next;
             }
             Message::OlderFrame {
                 generation,
@@ -693,8 +745,7 @@ impl AppModel {
     }
 
     fn apply_radar_size_change(&mut self) -> Task<cosmic::Action<Message>> {
-        self.recompose_current();
-        self.refresh_visible_map()
+        self.settle_now()
     }
 
     fn popup_limits(&self) -> Limits {
@@ -779,7 +830,13 @@ impl AppModel {
         self.radar_tiles = 0;
         self.pan_x = 0.0;
         self.pan_y = 0.0;
-        self.zoom = 7;
+        self.zoom = 7.0;
+        self.settled_zoom = 7.0;
+        self.settled_pan_x = 0.0;
+        self.settled_pan_y = 0.0;
+        self.settled_width = MAP_VIEW_WIDTH;
+        self.settled_height = MAP_VIEW_HEIGHT;
+        self.gesturing = false;
         self.shown_offset = 0;
         self.radar_opened = false;
         self.map_loading = false;
@@ -811,6 +868,7 @@ impl AppModel {
         let pan_x = self.pan_x;
         let pan_y = self.pan_y;
         let (view_width, view_height) = self.map_size();
+        let pixel_ratio = self.pixel_ratio;
         let shown_offset = self.shown_offset;
         let mut cache = self.tile_cache.clone();
         cosmic::task::future(async move {
@@ -841,6 +899,7 @@ impl AppModel {
                 pan_y,
                 view_width,
                 view_height,
+                pixel_ratio,
                 offset_minutes: first_offset,
             };
             match mapload::ensure_map_frame(&client, &mut cache, &kind, &request).await {
@@ -889,6 +948,7 @@ impl AppModel {
         let pan_x = self.pan_x;
         let pan_y = self.pan_y;
         let (view_width, view_height) = self.map_size();
+        let pixel_ratio = self.pixel_ratio;
         let mut cache = self.tile_cache.clone();
         cosmic::task::future(async move {
             let client = match HttpClient::new() {
@@ -908,6 +968,7 @@ impl AppModel {
                 pan_y,
                 view_width,
                 view_height,
+                pixel_ratio,
                 offset_minutes: offset,
             };
             match mapload::ensure_map_frame(&client, &mut cache, &kind, &request).await {
@@ -937,11 +998,14 @@ impl AppModel {
         }
     }
 
-    fn camera_matches(&self, zoom: u32, pan_x: f64, pan_y: f64) -> bool {
-        zoom == self.zoom && (pan_x - self.pan_x).abs() < 0.5 && (pan_y - self.pan_y).abs() < 0.5
+    fn camera_matches(&self, zoom: f64, pan_x: f64, pan_y: f64) -> bool {
+        (zoom - self.zoom).abs() < 1e-4
+            && (pan_x - self.pan_x).abs() < 0.5
+            && (pan_y - self.pan_y).abs() < 0.5
     }
 
-    fn apply_frame(&mut self, frame: LoadedFrame, zoom: u32, pan_x: f64, pan_y: f64) {
+    /// Present a settled frame when the camera still matches. Returns true when shown.
+    fn apply_frame(&mut self, frame: LoadedFrame, zoom: f64, pan_x: f64, pan_y: f64) -> bool {
         if !self.frames_ready.contains(&frame.offset_minutes) {
             self.frames_ready.push(frame.offset_minutes);
             self.frames_ready.sort_unstable();
@@ -950,23 +1014,56 @@ impl AppModel {
             self.shown_offset = frame.offset_minutes;
         }
         if !self.camera_matches(zoom, pan_x, pan_y) {
+            // Stale camera: keep the live snapshot; caller will settle again.
+            return false;
+        }
+        if self.shown_offset != frame.offset_minutes {
+            return false;
+        }
+        if frame.radar_tiles == 0 && self.map_handle.is_some() {
+            // Keep the previous snapshot; do not paint pale holes over it.
+            return false;
+        }
+        if self.radar_mode == RadarMode::Relief {
             self.recompose_current();
+            return self.map_handle.is_some();
+        }
+        self.radar_tiles = frame.radar_tiles;
+        self.present_snapshot(frame.width, frame.height, frame.pixels, zoom, pan_x, pan_y);
+        true
+    }
+
+    fn present_snapshot(
+        &mut self,
+        width: u32,
+        height: u32,
+        pixels: Vec<u8>,
+        zoom: f64,
+        pan_x: f64,
+        pan_y: f64,
+    ) {
+        let (view_width, view_height) = self.map_size();
+        self.settled_zoom = zoom;
+        self.settled_pan_x = pan_x;
+        self.settled_pan_y = pan_y;
+        self.settled_width = view_width;
+        self.settled_height = view_height;
+        self.map_handle = Some(cosmic::iced::widget::image::Handle::from_rgba(
+            width, height, pixels,
+        ));
+    }
+
+    fn present_current_snapshot(&mut self) {
+        let Some(handle) = self.map_handle.clone() else {
             return;
-        }
-        if self.shown_offset == frame.offset_minutes {
-            if self.radar_mode == RadarMode::Relief {
-                self.recompose_current();
-            } else {
-                self.radar_tiles = frame.radar_tiles;
-                self.map_handle = Some(cosmic::iced::widget::image::Handle::from_rgba(
-                    frame.width,
-                    frame.height,
-                    frame.pixels,
-                ));
-            }
-        } else {
-            self.recompose_current();
-        }
+        };
+        let (view_width, view_height) = self.map_size();
+        self.settled_zoom = self.zoom;
+        self.settled_pan_x = self.pan_x;
+        self.settled_pan_y = self.pan_y;
+        self.settled_width = view_width;
+        self.settled_height = view_height;
+        self.map_handle = Some(handle);
     }
 
     fn begin_drag(&self, point: Point, orbit: bool) -> DragState {
@@ -990,7 +1087,7 @@ impl AppModel {
             return;
         };
         let (view_width, view_height) = self.map_size();
-        let viewport = viewport_for(
+        let (viewport, frac_scale) = mapload::viewport_for(
             place.latitude,
             place.longitude,
             self.zoom,
@@ -1000,43 +1097,65 @@ impl AppModel {
             view_height,
         );
         let kind = basemap_kind(&self.config);
+        let present = mapload::PresentScale {
+            frac_scale,
+            view_width,
+            view_height,
+            pixel_ratio: self.pixel_ratio,
+        };
         if self.radar_mode == RadarMode::Relief {
-            let Ok((ground, mut radar, radar_tiles)) = mapload::compose_relief_layers(
+            let Ok((ground, radar, radar_tiles)) = mapload::compose_relief_layers(
                 &self.tile_cache,
                 &kind,
                 &viewport,
+                present,
                 self.shown_offset,
             ) else {
                 return;
             };
-            denoise_radar(&mut radar.pixels, radar.width, radar.height);
+            if radar_tiles == 0 && self.map_handle.is_some() {
+                return;
+            }
             let (cols, rows) = echo_grid(radar.width, radar.height);
             let echoes = sample_echoes(&radar.pixels, radar.width, radar.height, cols, rows);
             self.relief_empty = echoes.is_empty();
             let field = build_echo_field(&echoes, cols, rows);
             self.radar_tiles = radar_tiles;
-            self.relief_ground = Some(ground.clone());
-            self.relief_field = Some(field.clone());
+            self.relief_ground.replace(ground.clone());
+            self.relief_field.replace(field.clone());
             let painted = render_relief(&ground, &field, &self.relief_camera);
-            self.map_handle = Some(cosmic::iced::widget::image::Handle::from_rgba(
+            self.present_snapshot(
                 painted.width,
                 painted.height,
                 painted.pixels,
-            ));
+                self.zoom,
+                self.pan_x,
+                self.pan_y,
+            );
             return;
         }
         self.relief_empty = false;
-        let Ok(frame) =
-            mapload::compose_cached(&self.tile_cache, &kind, &viewport, self.shown_offset)
-        else {
+        let Ok(frame) = mapload::compose_cached(
+            &self.tile_cache,
+            &kind,
+            &viewport,
+            present,
+            self.shown_offset,
+        ) else {
             return;
         };
+        if frame.radar_tiles == 0 && self.map_handle.is_some() {
+            return;
+        }
         self.radar_tiles = frame.radar_tiles;
-        self.map_handle = Some(cosmic::iced::widget::image::Handle::from_rgba(
+        self.present_snapshot(
             frame.width,
             frame.height,
             frame.pixels,
-        ));
+            self.zoom,
+            self.pan_x,
+            self.pan_y,
+        );
     }
 
     fn paint_relief_from_cache(&mut self) {
@@ -1056,7 +1175,7 @@ impl AppModel {
     ///
     /// First load still goes through `reload_map`. Later pan/zoom settles fill
     /// edge tiles for the shown frame and every frame already ready, then
-    /// recompose so basemap and radar stay locked.
+    /// present once the camera is still.
     fn refresh_visible_map(&mut self) -> Task<cosmic::Action<Message>> {
         if self.map_handle.is_none() || self.frames_ready.is_empty() {
             return self.reload_map(false);
@@ -1072,6 +1191,7 @@ impl AppModel {
         let pan_x = self.pan_x;
         let pan_y = self.pan_y;
         let (view_width, view_height) = self.map_size();
+        let pixel_ratio = self.pixel_ratio;
         let shown_offset = self.shown_offset;
         let extra_offsets: Vec<u32> = self
             .frames_ready
@@ -1105,6 +1225,7 @@ impl AppModel {
                 pan_y,
                 view_width,
                 view_height,
+                pixel_ratio,
                 offset_minutes: shown_offset,
             };
             match mapload::ensure_map_frames(&client, &mut cache, &kind, &request, &extra_offsets)
@@ -1127,14 +1248,14 @@ impl AppModel {
         })
     }
 
-    fn advance_radar(&mut self) {
+    fn advance_radar(&mut self) -> Task<cosmic::Action<Message>> {
         let sequence: Vec<u32> = applet_radar_frames()
             .into_iter()
             .map(|frame| frame.offset_minutes)
             .filter(|offset| self.frames_ready.contains(offset))
             .collect();
         if sequence.len() < 2 {
-            return;
+            return Task::none();
         }
         let index = sequence
             .iter()
@@ -1142,46 +1263,96 @@ impl AppModel {
             .unwrap_or(0);
         let next = (index + 1) % sequence.len();
         self.shown_offset = sequence[next];
-        self.recompose_current();
+        if self.gesturing {
+            return self.schedule_settle();
+        }
+        self.settle_now()
     }
 
-    fn set_zoom(&mut self, zoom: u32) -> Task<cosmic::Action<Message>> {
-        let zoom = zoom.clamp(APPLET_ZOOM_MIN, APPLET_ZOOM_MAX);
-        if zoom == self.zoom {
+    fn nudge_zoom(&mut self, steps: f64) -> Task<cosmic::Action<Message>> {
+        let (view_width, view_height) = self.map_size();
+        let origin_x = f64::from(view_width) / 2.0;
+        let origin_y = f64::from(view_height) / 2.0;
+        let next = zoom_toward(
+            GestureCamera {
+                zoom: self.zoom,
+                pan_x: self.pan_x,
+                pan_y: self.pan_y,
+            },
+            self.zoom + steps,
+            origin_x,
+            origin_y,
+            f64::from(view_width),
+            f64::from(view_height),
+        );
+        if (next.zoom - self.zoom).abs() < 1e-6 {
             return Task::none();
         }
-        let scale = 2f64.powi(zoom as i32 - self.zoom as i32);
-        self.pan_x *= scale;
-        self.pan_y *= scale;
-        self.zoom = zoom;
-        self.recompose_current();
+        self.zoom = next.zoom;
+        self.pan_x = next.pan_x;
+        self.pan_y = next.pan_y;
+        self.gesturing = true;
         self.schedule_settle()
     }
 
     fn handle_scroll(&mut self, delta: ScrollDelta) -> Task<cosmic::Action<Message>> {
+        let (view_width, view_height) = self.map_size();
+        let width = f64::from(view_width);
+        let height = f64::from(view_height);
+        let (origin_x, origin_y) = self
+            .pointer
+            .map(|point| (f64::from(point.x), f64::from(point.y)))
+            .unwrap_or((width / 2.0, height / 2.0));
         match delta {
             ScrollDelta::Lines { y, .. } => {
-                if y > 0.0 {
-                    self.set_zoom(self.zoom.saturating_add(1))
-                } else if y < 0.0 {
-                    self.set_zoom(self.zoom.saturating_sub(1))
-                } else {
-                    Task::none()
+                if y == 0.0 {
+                    return Task::none();
                 }
+                let pixels = f64::from(y) * 16.0;
+                let next = zoom_toward(
+                    GestureCamera {
+                        zoom: self.zoom,
+                        pan_x: self.pan_x,
+                        pan_y: self.pan_y,
+                    },
+                    self.zoom - pixels * 0.008,
+                    origin_x,
+                    origin_y,
+                    width,
+                    height,
+                );
+                self.zoom = next.zoom;
+                self.pan_x = next.pan_x;
+                self.pan_y = next.pan_y;
+                self.gesturing = true;
+                self.schedule_settle()
             }
             ScrollDelta::Pixels { x, y } => {
                 if self.ctrl_held {
-                    if y > 0.0 {
-                        self.set_zoom(self.zoom.saturating_add(1))
-                    } else if y < 0.0 {
-                        self.set_zoom(self.zoom.saturating_sub(1))
-                    } else {
-                        Task::none()
+                    if y == 0.0 {
+                        return Task::none();
                     }
+                    let next = zoom_toward(
+                        GestureCamera {
+                            zoom: self.zoom,
+                            pan_x: self.pan_x,
+                            pan_y: self.pan_y,
+                        },
+                        self.zoom - f64::from(y) * 0.008,
+                        origin_x,
+                        origin_y,
+                        width,
+                        height,
+                    );
+                    self.zoom = next.zoom;
+                    self.pan_x = next.pan_x;
+                    self.pan_y = next.pan_y;
+                    self.gesturing = true;
+                    self.schedule_settle()
                 } else {
                     self.pan_x += f64::from(x);
                     self.pan_y += f64::from(y);
-                    self.recompose_current();
+                    self.gesturing = true;
                     self.schedule_settle()
                 }
             }
@@ -1195,6 +1366,85 @@ impl AppModel {
             tokio::time::sleep(MAP_SETTLE).await;
             Message::MapSettle(token)
         })
+    }
+
+    fn settle_now(&mut self) -> Task<cosmic::Action<Message>> {
+        self.gesturing = false;
+        self.settle_token = self.settle_token.wrapping_add(1);
+        self.refresh_visible_map()
+    }
+
+    fn schedule_prefetch(&mut self) -> Task<cosmic::Action<Message>> {
+        let Some(place) = self.place.clone() else {
+            return Task::none();
+        };
+        let kind = basemap_kind(&self.config);
+        let zoom = self.zoom;
+        let pan_x = self.pan_x;
+        let pan_y = self.pan_y;
+        let (view_width, view_height) = self.map_size();
+        let pixel_ratio = self.pixel_ratio;
+        let shown_offset = self.shown_offset;
+        let sequence: Vec<u32> = applet_radar_frames()
+            .into_iter()
+            .map(|frame| frame.offset_minutes)
+            .filter(|offset| self.frames_ready.contains(offset))
+            .collect();
+        let next_offset = if sequence.len() >= 2 {
+            let index = sequence
+                .iter()
+                .position(|offset| *offset == shown_offset)
+                .unwrap_or(0);
+            Some(sequence[(index + 1) % sequence.len()])
+        } else {
+            None
+        };
+        let mut cache = self.tile_cache.clone();
+        cosmic::task::future(async move {
+            let Ok(client) = HttpClient::new() else {
+                return Message::PrefetchDone {
+                    cache: Box::new(cache),
+                };
+            };
+            let request = mapload::MapRequest {
+                latitude: place.latitude,
+                longitude: place.longitude,
+                zoom,
+                pan_x,
+                pan_y,
+                view_width,
+                view_height,
+                pixel_ratio,
+                offset_minutes: shown_offset,
+            };
+            mapload::prefetch_around(&client, &mut cache, &kind, &request, next_offset).await;
+            Message::PrefetchDone {
+                cache: Box::new(cache),
+            }
+        })
+    }
+
+    /// Affine from the settled snapshot to the live camera for the radar canvas.
+    pub(crate) fn board_transform(&self) -> SnapshotTransform {
+        let (view_width, view_height) = self.map_size();
+        snapshot_transform(
+            GestureCamera {
+                zoom: self.settled_zoom,
+                pan_x: self.settled_pan_x,
+                pan_y: self.settled_pan_y,
+            },
+            GestureCamera {
+                zoom: self.zoom,
+                pan_x: self.pan_x,
+                pan_y: self.pan_y,
+            },
+            f64::from(view_width),
+            f64::from(view_height),
+        )
+    }
+
+    pub(crate) fn settled_map_size(&self) -> (u32, u32) {
+        (self.settled_width, self.settled_height)
     }
 
     pub(crate) fn panel_icon(&self) -> &'static str {

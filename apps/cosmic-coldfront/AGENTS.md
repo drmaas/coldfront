@@ -21,7 +21,7 @@ Do not call the web Worker from the applet.
 - `init` must not fetch. After startup, a valid saved ZIP loads place, forecast, and alerts so the panel icon matches. Radar tiles load only when the Radar tab is open (or was opened and needs a reload).
 - Call `HttpClient` for ZIP, forecast, and alerts. Call `mapload` for tiles. Call `compose_viewport` for Flat Radar and `compose_relief_layers` plus `render_relief` for the session 3D toggle. Map view size follows the image widget (compact or expanded).
 - Load the latest radar frame (offset 0) before older frames. Offsets stay 50, 40, 30, 20, 10, 0. Interactive zoom is 5–11. Playback is 800 ms while the popup is open on the Radar tab with at least two frames.
-- Pan/zoom always recomposites basemap + radar from the tile cache (holes for missing tiles). Prefetch edge tiles while dragging; settle without blanking the map.
+- Pan/zoom transforms the last settled composite with `snapshot_transform`. After a quiet settle (50 ms), fetch missing tiles and present once; do not recompose on every drag tick or overwrite a good snapshot with pale holes. Denoise each radar tile once at fetch into the tile LRU. Prefetch neighbor zooms and the next frame after a successful present.
 - Ignore applying `WeatherReady`, `MapReady`, `OlderFrame`, and `FrameSkipped` when `generation` / `map_generation` does not match. Stale `MapReady` / `OlderFrame` still merge successful tiles into the cache.
 - A failed alert request becomes an empty list. Do not fail the forecast for that. A failed weather refresh keeps the last forecast and sets `refresh_failed`.
 - Do not refetch when the user switches °F and °C.

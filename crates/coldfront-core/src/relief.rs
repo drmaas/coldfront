@@ -159,6 +159,33 @@ pub fn sample_echoes(
     echoes
 }
 
+/// Decode a radar tile PNG, denoise once, and re-encode as PNG.
+///
+/// Returns `None` when the bytes are not a decodeable image.
+#[must_use]
+pub fn denoise_radar_png(bytes: &[u8]) -> Option<Vec<u8>> {
+    use crate::radar::TILE_SIZE;
+    use image::{ExtendedColorType, ImageEncoder, codecs::png::PngEncoder, imageops};
+
+    let image = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let mut image = if image.width() == TILE_SIZE && image.height() == TILE_SIZE {
+        image
+    } else {
+        imageops::resize(&image, TILE_SIZE, TILE_SIZE, imageops::FilterType::Triangle)
+    };
+    denoise_radar(image.as_mut(), TILE_SIZE, TILE_SIZE);
+    let mut out = Vec::new();
+    PngEncoder::new(&mut out)
+        .write_image(
+            image.as_raw(),
+            TILE_SIZE,
+            TILE_SIZE,
+            ExtendedColorType::Rgba8,
+        )
+        .ok()?;
+    Some(out)
+}
+
 /// Drop isolated n0q speckle in place. Lone returns go transparent.
 pub fn denoise_radar(pixels: &mut [u8], width: u32, height: u32) {
     if width == 0 || height == 0 {

@@ -15,8 +15,8 @@ use cosmic::widget::svg;
 
 use coldfront_core::{
     Day, SnapshotTransform, chart_points, day_label, describe, display_icon, display_temperature,
-    display_wind_mph, format_as_of, format_clock_time, format_precip_amount_mm, hour_label,
-    is_us_zip, next_hours, range_placement,
+    display_wind_mph, format_as_of, format_clock_time, format_geocode_label,
+    format_precip_amount_mm, hour_label, next_hours, range_placement,
 };
 
 use crate::app::{AppModel, Message, PopupTab};
@@ -408,7 +408,7 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
         map_placeholder(fl!("loading-radar"), width, height)
     } else if let Some(error) = &app.map_error {
         map_placeholder(error.clone(), width, height)
-    } else if !is_us_zip(&app.config.zip) {
+    } else if !app.config.has_weather_location() {
         map_placeholder(fl!("enter-zip"), width, height)
     } else {
         map_placeholder(fl!("loading-radar"), width, height)
@@ -799,22 +799,32 @@ fn detail_pair(label: String, value: String) -> Element<'static, Message> {
 
 fn settings_tab(app: &AppModel) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
-    let zip = widget::text_input(fl!("zip-placeholder"), &app.zip_draft)
+    let zip = widget::text_input(fl!("location-placeholder"), &app.zip_draft)
         .on_input(Message::ZipDraft)
         .on_submit(|_| Message::SaveZip);
     let key = widget::text_input(fl!("maptiler-placeholder"), &app.key_draft)
         .on_input(Message::KeyDraft)
         .on_submit(|_| Message::SaveKey);
-
-    widget::Column::new()
+    let mut column = widget::Column::new()
         .spacing(spacing.space_s)
         .push(widget::text::title4(fl!("tooltip-settings")))
         .push(
             widget::Row::new()
                 .spacing(spacing.space_xs)
                 .push(zip)
-                .push(widget::button::suggested(fl!("save-zip")).on_press(Message::SaveZip)),
-        )
+                .push(widget::button::suggested(fl!("save-location")).on_press(Message::SaveZip)),
+        );
+    if app.geocode_loading {
+        column = column.push(widget::text::caption(fl!("searching-cities")));
+    }
+    if let Some(error) = app.geocode_error.as_deref() {
+        column = column.push(widget::text::caption(error));
+    }
+    for (index, hit) in app.geocode_hits.iter().enumerate() {
+        let label = format_geocode_label(hit);
+        column = column.push(widget::button::standard(label).on_press(Message::PickGeocode(index)));
+    }
+    column
         .push(widget::text::caption(fl!("units")))
         .push(
             widget::segmented_control::horizontal(&app.unit_model)
@@ -833,7 +843,7 @@ fn settings_tab(app: &AppModel) -> Element<'_, Message> {
 
 fn zip_row(app: &AppModel) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
-    let zip = widget::text_input(fl!("zip-placeholder"), &app.zip_draft)
+    let zip = widget::text_input(fl!("location-placeholder"), &app.zip_draft)
         .on_input(Message::ZipDraft)
         .on_submit(|_| Message::SaveZip);
     widget::Row::new()

@@ -97,6 +97,7 @@ Only `GET` and `HEAD` are allowed. Other methods return 405.
 | `/api/config` | JSON `{ "basemap": "maptiler" }` or `{ "basemap": "none" }` | `no-store` |
 | `/api/zip/{five digits}` | Zippopotam `/us/{zip}` body and status | `public, max-age=86400` |
 | `/api/zip` and any other `/api/zip/...` | 400, `enter a 5-digit US ZIP code` | `no-store` |
+| `/api/geocode/search?name=` | Open-Meteo geocoding (`countryCode=US`) | `public, max-age=86400` |
 | `/api/forecast?latitude&longitude` | Open-Meteo forecast | `public, max-age=300` |
 | `/api/alerts?latitude&longitude` | `api.weather.gov` active alerts | `public, max-age=60` |
 | `/api/map/{z}/{x}/{y}.png` | MapTiler `basic-v2` PNG | `public, max-age=86400` |
@@ -112,8 +113,8 @@ Logs use `head_sampling_rate` 1. Traces use `head_sampling_rate` 0.01. `compatib
 
 ### Web loadForecast steps
 
-1. `GET /api/zip/{zip}` and `GET /api/config` together.
-2. Parse the ZIP JSON with `parseZippopotam`. A 404 becomes "No place found for that ZIP code."
+1. For a ZIP route, `GET /api/zip/{zip}` and `GET /api/config` together. Parse with `parseZippopotam`. A 404 becomes "No place found for that ZIP code."
+2. For a coordinate route, restore the cached `Place` from `coldfront-place` when the coordinates match, or build a coordinate-only place for the forecast request.
 3. `GET /api/forecast?latitude=&longitude=` and `GET /api/alerts?latitude=&longitude=` together.
 4. A failed forecast response rejects the page. A non-OK alerts response becomes an empty list. Alerts JSON that fails `parseAlerts` still rejects the page.
 5. `basemap` is `maptiler` only when `/api/config` says `maptiler`. Otherwise it is `none`.

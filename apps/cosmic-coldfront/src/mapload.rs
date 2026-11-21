@@ -12,8 +12,8 @@ use std::fmt;
 use coldfront_core::{
     Alert, Error, Forecast, HttpClient, MapCamera, MapViewport, Place, RadarFrame, Raster,
     applet_radar_frames, compose_viewport, compose_viewport_ground, compose_viewport_radar_layer,
-    denoise_radar_png, iem_tile_url, map_viewport, maptiler_tile_url, osm_tile_url, scale_raster,
-    tile_camera,
+    denoise_radar_png, has_resolved_coordinates, iem_tile_url, is_us_zip, map_viewport,
+    maptiler_tile_url, osm_tile_url, scale_raster, tile_camera,
 };
 
 /// Compact Radar tab image. Narrower than the popup so zoom controls sit on the map.
@@ -168,16 +168,48 @@ impl TileCache {
 
 pub async fn load_weather(client: &HttpClient, zip: &str) -> Result<WeatherBundle, Error> {
     let place = client.lookup_zip(zip).await?;
+    load_weather_at_place(client, &place).await
+}
+
+pub async fn load_weather_at_place(
+    client: &HttpClient,
+    place: &Place,
+) -> Result<WeatherBundle, Error> {
     let forecast = client.forecast(place.latitude, place.longitude).await?;
     let alerts = client
         .alerts(place.latitude, place.longitude)
         .await
         .unwrap_or_default();
     Ok(WeatherBundle {
-        place,
+        place: place.clone(),
         forecast,
         alerts,
     })
+}
+
+pub async fn load_weather_from_config(
+    client: &HttpClient,
+    zip: &str,
+    city: &str,
+    state_abbreviation: &str,
+    latitude: f64,
+    longitude: f64,
+) -> Result<WeatherBundle, Error> {
+    if is_us_zip(zip) {
+        return load_weather(client, zip).await;
+    }
+    if has_resolved_coordinates(latitude, longitude) {
+        let place = Place {
+            zip: zip.to_owned(),
+            city: city.to_owned(),
+            state: String::new(),
+            state_abbreviation: state_abbreviation.to_owned(),
+            latitude,
+            longitude,
+        };
+        return load_weather_at_place(client, &place).await;
+    }
+    Err(Error::InvalidZip)
 }
 
 #[must_use]

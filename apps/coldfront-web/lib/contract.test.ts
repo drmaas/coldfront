@@ -18,7 +18,9 @@ import {
   nextHours,
   parseAlerts,
   parseOpenMeteo,
+  parseGeocodeSearch,
   parseZippopotam,
+  placeFromGeocodeHit,
   rangePlacement,
   roundHalfAwayFromZero,
   tileWindow,
@@ -96,6 +98,13 @@ const contract = fixture("contract.json") as {
   applet_frames: number;
   applet_first_offset: number;
   codes: Array<{ code: number; label: string; icon: string }>;
+  geocode: {
+    eureka_ca_zip: string;
+    eureka_ca_city: string;
+    eureka_ca_state: string;
+    eureka_ca_latitude: number;
+    eureka_ca_longitude: number;
+  };
   zips: { valid: string[]; invalid: string[] };
   relief: {
     bands: Array<{ r: number; g: number; b: number; height: number }>;
@@ -120,6 +129,16 @@ describe("shared fixtures", () => {
   it("checks ZIP codes", () => {
     for (const zip of contract.zips.valid) expect(isUsZip(zip)).toBe(true);
     for (const zip of contract.zips.invalid) expect(isUsZip(zip)).toBe(false);
+  });
+
+  it("maps Eureka geocoder results like Rust", () => {
+    const hit = parseGeocodeSearch(fixture("geocode-eureka.json"))[0];
+    const place = placeFromGeocodeHit(hit);
+    expect(place.zip).toBe(contract.geocode.eureka_ca_zip);
+    expect(place.city).toBe(contract.geocode.eureka_ca_city);
+    expect(place.stateAbbreviation).toBe(contract.geocode.eureka_ca_state);
+    expect(place.latitude).toBeCloseTo(contract.geocode.eureka_ca_latitude, 4);
+    expect(place.longitude).toBeCloseTo(contract.geocode.eureka_ca_longitude, 4);
   });
 
   it("parses the Saint Paul forecast the same way as Rust", () => {

@@ -2,7 +2,7 @@
 
 Vite and React site for Coldfront. A Cloudflare Worker sits in front of `/api/*`. Static assets serve the rest. This is Workers static assets, not Cloudflare Pages.
 
-Enter a 5-digit US ZIP code. The page shows current conditions, the next 24 hours, a 10-day forecast, a radar canvas, and up to three National Weather Service alerts. Routes are `/` and `/:zip`.
+Enter a 5-digit US ZIP code or a US city name. Five digits still use Zippopotam. City search uses Open-Meteo geocoding through `/api/geocode/search`. The page shows current conditions, the next 24 hours, a 10-day forecast, a radar canvas, and up to three National Weather Service alerts. Routes are `/`, `/:zip`, and `/@{lat},{lon}` for saved coordinates.
 
 The browser never holds the MapTiler key. The Worker also sets the User-Agent that the National Weather Service requires.
 

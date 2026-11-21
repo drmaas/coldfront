@@ -10,6 +10,8 @@ pub mod chart;
 pub mod client;
 pub mod error;
 pub mod forecast;
+pub mod geocode;
+pub mod location;
 pub mod place;
 pub mod radar;
 pub mod relief;
@@ -24,6 +26,14 @@ pub use error::Error;
 pub use forecast::{
     Day, Forecast, Hour, day_label, format_as_of, format_clock_time, format_precip_amount_mm,
     hour_label, next_hours, parse_open_meteo,
+};
+pub use geocode::{
+    GEOCODE_QUERY_MAX_LEN, GeocodeHit, format_geocode_label, geocode_query_allowed, geocode_url,
+    parse_geocode_search, place_from_geocode_hit, state_abbreviation,
+};
+pub use location::{
+    RouteTarget, coordinates_match, has_resolved_coordinates, is_zip_lookup, location_path,
+    parse_route_path, place_from_coordinates,
 };
 pub use place::{Place, parse_zippopotam};
 pub use radar::{

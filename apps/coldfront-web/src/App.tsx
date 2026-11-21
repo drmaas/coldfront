@@ -10,7 +10,6 @@ import {
   formatClockTime,
   formatPrecipAmountMm,
   hourLabel,
-  isUsZip,
   nextHours,
   parseAlerts,
   parseOpenMeteo,
@@ -22,9 +21,12 @@ import {
   type Forecast,
   type Place,
 } from "../lib/domain";
+import { parseRoutePath, placeFromCoordinates, type RouteTarget } from "../lib/location";
 import { FORECAST_DAY_DETAILS_ID, dayRowButtonA11y } from "./forecastDayA11y";
 import { ColdFront, PrecipDrop, WeatherIcon, Wordmark } from "./icons";
+import { LocationSearch } from "./LocationSearch";
 import { RadarMap } from "./RadarMap";
+import { readStoredPlace, writeStoredPlace } from "./locationStorage";
 import {
   applyResolvedTheme,
   readThemePreference,
@@ -39,19 +41,13 @@ export function App() {
   const path = usePath();
   const [units, setUnits] = useUnits();
   const [theme, setTheme] = useTheme();
-  const zip = path === "/" ? null : path.slice(1);
+  const route = useMemo(() => parseRoutePath(path), [path]);
   return (
     <>
-      {zip === null ? (
+      {route.kind === "home" ? (
         <Landing theme={theme} onTheme={setTheme} />
       ) : (
-        <ForecastPage
-          zip={decodeURIComponent(zip)}
-          units={units}
-          onUnits={setUnits}
-          theme={theme}
-          onTheme={setTheme}
-        />
+        <ForecastPage route={route} units={units} onUnits={setUnits} theme={theme} onTheme={setTheme} />
       )}
       <footer className="site-footer">
         Forecast data by Open-Meteo. Radar tiles by Iowa Environmental Mesonet, NOAA NEXRAD. Alerts by the National
@@ -62,7 +58,6 @@ export function App() {
 }
 
 function Landing({ theme, onTheme }: { theme: ThemePreference; onTheme: (theme: ThemePreference) => void }) {
-  const [zip, setZip] = useState("");
   const [error, setError] = useState("");
   return (
     <main className="landing">
@@ -70,36 +65,15 @@ function Landing({ theme, onTheme }: { theme: ThemePreference; onTheme: (theme: 
         <ThemeToggle theme={theme} onTheme={onTheme} />
       </div>
       <Wordmark />
-      <form
+      <LocationSearch
         className="landing-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const next = zip.trim();
-          if (!isUsZip(next)) {
-            setError("Enter a 5-digit US ZIP code.");
-            return;
-          }
-          go(`/${next}`);
-        }}
-      >
-        <input
-          className="hero-zip"
-          inputMode="numeric"
-          autoComplete="postal-code"
-          maxLength={5}
-          placeholder="94110"
-          aria-label="ZIP code"
-          value={zip}
-          onChange={(event) => {
-            setZip(event.target.value);
-            setError("");
-          }}
-        />
-        <button className="primary" type="submit">
-          Get forecast
-        </button>
-        {error && <p className="form-error">{error}</p>}
-      </form>
+        inputClassName="hero-zip"
+        placeholder="ZIP or city"
+        submitLabel="Get forecast"
+        onNavigate={go}
+        onError={setError}
+      />
+      {error ? <p className="form-error landing-error">{error}</p> : null}
       <p className="subtitle">
         Current conditions, the next 24 hours, and a 10-day forecast from Open-Meteo, with live NEXRAD radar and active
         NWS alerts.
@@ -109,37 +83,33 @@ function Landing({ theme, onTheme }: { theme: ThemePreference; onTheme: (theme: 
 }
 
 function ForecastPage({
-  zip,
+  route,
   units,
   onUnits,
   theme,
   onTheme,
 }: {
-  zip: string;
+  route: Exclude<RouteTarget, { kind: "home" }>;
   units: Units;
   onUnits: (units: Units) => void;
   theme: ThemePreference;
   onTheme: (theme: ThemePreference) => void;
 }) {
-  const [draft, setDraft] = useState(zip);
+  const initialDraft = route.kind === "zip" ? route.zip : "";
+  const [draft, setDraft] = useState(initialDraft);
   const [data, setData] = useState<ForecastData | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setDraft(zip);
-    if (!isUsZip(zip)) {
-      setLoading(false);
-      setData(null);
-      setError("Enter a 5-digit US ZIP code.");
-      return undefined;
-    }
+    setDraft(route.kind === "zip" ? route.zip : "");
     const controller = new AbortController();
     setLoading(true);
     setError("");
-    void loadForecast(zip, controller.signal)
+    void resolveForecastRoute(route, controller.signal)
       .then((next) => {
         if (!controller.signal.aborted) {
+          writeStoredPlace(next.place);
           setData(next);
           setLoading(false);
         }
@@ -151,7 +121,7 @@ function ForecastPage({
         setError(reason instanceof Error ? reason.message : "Could not load the forecast.");
       });
     return () => controller.abort();
-  }, [zip]);
+  }, [route]);
 
   return (
     <main className="forecast-page">
@@ -159,20 +129,13 @@ function ForecastPage({
         <a className="brand" href="/" onClick={link("/")}>
           <Wordmark />
         </a>
-        <form
-          className="zip-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const next = draft.trim();
-            if (isUsZip(next)) go(`/${next}`);
-            else setError("Enter a 5-digit US ZIP code.");
-          }}
-        >
-          <input aria-label="ZIP code" value={draft} maxLength={5} onChange={(event) => setDraft(event.target.value)} />
-          <button className="primary" type="submit">
-            Go
-          </button>
-        </form>
+        <LocationSearch
+          className="zip-form location-topbar"
+          initialValue={draft}
+          submitLabel="Go"
+          onNavigate={go}
+          onError={setError}
+        />
         <div className="units" role="group" aria-label="Temperature units">
           <button type="button" className={units === "F" ? "on" : ""} onClick={() => onUnits("F")}>
             °F
@@ -219,13 +182,12 @@ function ForecastBody({ data, units }: { data: ForecastData; units: Units }) {
     : `${roundHalfAwayFromZero(current.windKmh)} km/h`;
   const condition = describe(current.weatherCode);
   const currentIcon = displayIcon(condition.icon, current.isDay);
+  const placeLine = formatPlaceLine(place);
 
   return (
     <div className="forecast-grid">
       <section className="conditions">
-        <p className="place">
-          {place.city}, {place.stateAbbreviation} {place.zip}
-        </p>
+        <p className="place">{placeLine}</p>
         <div className="now">
           <WeatherIcon name={currentIcon} />
           <p className="temp">
@@ -340,6 +302,14 @@ function ForecastBody({ data, units }: { data: ForecastData; units: Units }) {
   );
 }
 
+function formatPlaceLine(place: Place): string {
+  const name = [place.city, place.stateAbbreviation].filter(Boolean).join(", ");
+  if (name && place.zip) return `${name} ${place.zip}`;
+  if (name) return name;
+  if (place.zip) return place.zip;
+  return `${place.latitude.toFixed(4)}, ${place.longitude.toFixed(4)}`;
+}
+
 function DayDetails({ day, dayTitle, fahrenheit }: { day: Day; dayTitle: string; fahrenheit: boolean }) {
   const info = describe(day.weatherCode);
   const rows: Array<{ label: string; value: string }> = [
@@ -383,7 +353,19 @@ function DayDetails({ day, dayTitle, fahrenheit }: { day: Day; dayTitle: string;
   );
 }
 
-async function loadForecast(zip: string, signal: AbortSignal): Promise<ForecastData> {
+async function resolveForecastRoute(
+  route: Exclude<RouteTarget, { kind: "home" }>,
+  signal: AbortSignal,
+): Promise<ForecastData> {
+  if (route.kind === "zip") {
+    return loadForecastByZip(route.zip, signal);
+  }
+  const stored = readStoredPlace(route.latitude, route.longitude);
+  const place = placeFromCoordinates(route.latitude, route.longitude, stored);
+  return loadForecastForPlace(place, signal);
+}
+
+async function loadForecastByZip(zip: string, signal: AbortSignal): Promise<ForecastData> {
   const [placeResponse, configResponse] = await Promise.all([
     fetch(`/api/zip/${zip}`, { signal }),
     fetch("/api/config", { signal }),
@@ -391,6 +373,17 @@ async function loadForecast(zip: string, signal: AbortSignal): Promise<ForecastD
   if (placeResponse.status === 404) throw new Error("No place found for that ZIP code.");
   if (!placeResponse.ok) throw new Error("Could not look up that ZIP code.");
   const place = parseZippopotam(await placeResponse.json());
+  return loadForecastForPlace(place, signal, await configResponse.json());
+}
+
+async function loadForecastForPlace(
+  place: Place,
+  signal: AbortSignal,
+  configBody?: unknown,
+): Promise<ForecastData> {
+  const configResponse =
+    configBody === undefined ? await fetch("/api/config", { signal }) : ({ ok: true, json: async () => configBody });
+  if (!configResponse.ok) throw new Error("Could not load configuration.");
   const config = (await configResponse.json()) as { basemap?: string };
   const query = `latitude=${place.latitude}&longitude=${place.longitude}`;
   const [forecastResponse, alertsResponse] = await Promise.all([

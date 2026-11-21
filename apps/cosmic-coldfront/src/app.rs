@@ -15,11 +15,14 @@ use cosmic::widget;
 use cosmic::widget::segmented_button;
 
 use coldfront_core::{
-    Alert, EchoField, Forecast, GestureCamera, HttpClient, Place, Raster, ReliefCamera,
+    Alert, EchoField, Forecast, GeocodeHit, GestureCamera, HttpClient, Place, Raster, ReliefCamera,
     SnapshotTransform, applet_radar_frames, build_echo_field, clamp_relief_pitch,
-    default_relief_camera, describe, display_icon, display_temperature, echo_grid, is_us_zip,
-    render_relief, sample_echoes, snapshot_transform, symbolic_icon, zoom_toward,
+    default_relief_camera, describe, display_icon, display_temperature, echo_grid,
+    geocode_query_allowed, is_us_zip, is_zip_lookup, place_from_geocode_hit, render_relief,
+    sample_echoes, snapshot_transform, symbolic_icon, zoom_toward,
 };
+
+const GEOCODE_SEARCH_DEBOUNCE: Duration = Duration::from_millis(300);
 
 use crate::config::{self, Config};
 use crate::fl;
@@ -63,6 +66,11 @@ pub struct AppModel {
     pub(crate) popup: Option<Id>,
     pub(crate) config: Config,
     pub(crate) zip_draft: String,
+    pub(crate) geocode_hits: Vec<GeocodeHit>,
+    geocode_hits_query: String,
+    pub(crate) geocode_loading: bool,
+    pub(crate) geocode_error: Option<String>,
+    geocode_generation: u64,
     pub(crate) key_draft: String,
     generation: u64,
     map_generation: u64,
@@ -145,6 +153,18 @@ pub enum Message {
     RefreshWeather,
     ZipDraft(String),
     SaveZip,
+    GeocodeSearch {
+        generation: u64,
+    },
+    GeocodeReady {
+        generation: u64,
+        hits: Vec<GeocodeHit>,
+    },
+    GeocodeFailed {
+        generation: u64,
+        message: String,
+    },
+    PickGeocode(usize),
     KeyDraft(String),
     SaveKey,
     ToggleOsm(bool),
@@ -234,7 +254,12 @@ impl cosmic::Application for AppModel {
         let app = Self {
             core,
             popup: None,
-            zip_draft: config.zip.clone(),
+            zip_draft: location_draft(&config),
+            geocode_hits: Vec::new(),
+            geocode_hits_query: String::new(),
+            geocode_loading: false,
+            geocode_error: None,
+            geocode_generation: 0,
             key_draft: config.maptiler_api_key.clone(),
             tab_model: build_tab_model(active_tab),
             unit_model: build_unit_model(config.fahrenheit),
@@ -328,7 +353,7 @@ impl cosmic::Application for AppModel {
             subscriptions.push(
                 cosmic::iced::time::every(Duration::from_millis(50)).map(|_| Message::StartupFetch),
             );
-        } else if is_us_zip(&self.config.zip) {
+        } else if self.config.has_weather_location() {
             subscriptions
                 .push(cosmic::iced::time::every(WEATHER_REFRESH).map(|_| Message::RefreshWeather));
         }
@@ -358,14 +383,14 @@ impl cosmic::Application for AppModel {
             }
             Message::Surface(action) => return Task::done(cosmic::action::surface(action)),
             Message::UpdateConfig(config) => {
-                let zip_changed = config.zip != self.config.zip;
+                let location_changed = location_changed(&self.config, &config);
                 let key_changed = config.maptiler_api_key != self.config.maptiler_api_key;
                 let osm_changed = config.allow_osm_basemap != self.config.allow_osm_basemap;
                 self.config = config;
-                self.zip_draft.clone_from(&self.config.zip);
+                self.zip_draft = location_draft(&self.config);
                 self.key_draft.clone_from(&self.config.maptiler_api_key);
                 self.unit_model = build_unit_model(self.config.fahrenheit);
-                if zip_changed {
+                if location_changed {
                     return self.start_weather_load(true);
                 }
                 if (key_changed || osm_changed) && self.radar_opened {
@@ -377,18 +402,80 @@ impl cosmic::Application for AppModel {
                     return Task::none();
                 }
                 self.startup_fetch_done = true;
-                if is_us_zip(&self.config.zip) {
+                if self.config.has_weather_location() {
                     return self.start_weather_load(false);
                 }
             }
             Message::RefreshWeather => {
-                if is_us_zip(&self.config.zip) {
+                if self.config.has_weather_location() {
                     return self.start_weather_load(false);
                 }
             }
-            Message::ZipDraft(value) => self.zip_draft = value,
-            Message::SaveZip => {
-                self.config.zip = self.zip_draft.trim().to_string();
+            Message::ZipDraft(value) => {
+                self.zip_draft = value;
+                self.geocode_error = None;
+                self.geocode_hits.clear();
+                self.geocode_hits_query.clear();
+                let trimmed = self.zip_draft.trim();
+                if trimmed.is_empty() || is_zip_lookup(trimmed) {
+                    self.geocode_loading = false;
+                    return Task::none();
+                }
+                self.geocode_generation = self.geocode_generation.wrapping_add(1);
+                let generation = self.geocode_generation;
+                return cosmic::task::future(async move {
+                    tokio::time::sleep(GEOCODE_SEARCH_DEBOUNCE).await;
+                    Message::GeocodeSearch { generation }
+                });
+            }
+            Message::GeocodeSearch { generation } => {
+                if generation != self.geocode_generation {
+                    return Task::none();
+                }
+                return self.run_geocode_search(generation);
+            }
+            Message::SaveZip => return self.save_location(),
+            Message::GeocodeReady { generation, hits } => {
+                if generation != self.geocode_generation {
+                    return Task::none();
+                }
+                self.geocode_loading = false;
+                self.geocode_hits = hits;
+                self.geocode_hits_query = self.zip_draft.trim().to_string();
+                if self.geocode_hits.is_empty() && !is_zip_lookup(&self.zip_draft) {
+                    self.geocode_error = Some("no matching US cities found".into());
+                }
+            }
+            Message::GeocodeFailed {
+                generation,
+                message,
+            } => {
+                if generation != self.geocode_generation {
+                    return Task::none();
+                }
+                self.geocode_loading = false;
+                self.geocode_hits.clear();
+                self.geocode_hits_query.clear();
+                self.geocode_error = Some(message);
+            }
+            Message::PickGeocode(index) => {
+                let trimmed = self.zip_draft.trim();
+                if self.geocode_hits_query != trimmed {
+                    return Task::none();
+                }
+                let Some(hit) = self.geocode_hits.get(index).cloned() else {
+                    return Task::none();
+                };
+                let place = place_from_geocode_hit(&hit);
+                self.config.apply_place(&place);
+                if is_us_zip(&place.zip) {
+                    self.zip_draft.clone_from(&place.zip);
+                } else {
+                    self.zip_draft = format!("{}, {}", place.city, place.state_abbreviation);
+                }
+                self.geocode_hits.clear();
+                self.geocode_hits_query.clear();
+                self.geocode_error = None;
                 config::save(&self.config);
                 return self.start_weather_load(true);
             }
@@ -690,7 +777,7 @@ impl AppModel {
             .get_popup_settings(parent, id, None, None, None);
         settings.positioner.size_limits = self.popup_limits();
         let open = get_popup(settings);
-        if self.forecast.is_none() && is_us_zip(&self.config.zip) && !self.weather_loading {
+        if self.forecast.is_none() && self.config.has_weather_location() && !self.weather_loading {
             Task::batch([open, self.start_weather_load(false)])
         } else {
             open
@@ -802,8 +889,7 @@ impl AppModel {
             self.forecast = None;
             self.alerts.clear();
         }
-        let zip = self.config.zip.clone();
-        if !is_us_zip(&zip) {
+        if !self.config.has_weather_location() {
             self.weather_loading = false;
             self.place = None;
             self.forecast = None;
@@ -811,6 +897,11 @@ impl AppModel {
             self.map_error = Some(coldfront_core::Error::InvalidZip.to_string());
             return Task::none();
         }
+        let zip = self.config.zip.clone();
+        let city = self.config.city.clone();
+        let state_abbreviation = self.config.state_abbreviation.clone();
+        let latitude = self.config.latitude;
+        let longitude = self.config.longitude;
         cosmic::task::future(async move {
             let client = match HttpClient::new() {
                 Ok(client) => client,
@@ -821,7 +912,16 @@ impl AppModel {
                     };
                 }
             };
-            match mapload::load_weather(&client, &zip).await {
+            match mapload::load_weather_from_config(
+                &client,
+                &zip,
+                &city,
+                &state_abbreviation,
+                latitude,
+                longitude,
+            )
+            .await
+            {
                 Ok(bundle) => Message::WeatherReady(Box::new(WeatherLoaded { generation, bundle })),
                 Err(error) => Message::WeatherFailed {
                     generation,
@@ -829,6 +929,74 @@ impl AppModel {
                 },
             }
         })
+    }
+
+    fn run_geocode_search(&mut self, generation: u64) -> Task<cosmic::Action<Message>> {
+        let trimmed = self.zip_draft.trim().to_string();
+        if is_zip_lookup(&trimmed) || trimmed.is_empty() || !geocode_query_allowed(&trimmed) {
+            self.geocode_hits.clear();
+            self.geocode_hits_query.clear();
+            self.geocode_loading = false;
+            if !trimmed.is_empty() && !is_zip_lookup(&trimmed) && !geocode_query_allowed(&trimmed) {
+                self.geocode_error = Some("no matching US cities found".into());
+            } else {
+                self.geocode_error = None;
+            }
+            return Task::none();
+        }
+        self.geocode_loading = true;
+        self.geocode_hits.clear();
+        self.geocode_hits_query.clear();
+        cosmic::task::future(async move {
+            let client = match HttpClient::new() {
+                Ok(client) => client,
+                Err(error) => {
+                    return Message::GeocodeFailed {
+                        generation,
+                        message: error.to_string(),
+                    };
+                }
+            };
+            match client.search_cities(&trimmed).await {
+                Ok(hits) => Message::GeocodeReady { generation, hits },
+                Err(error) => Message::GeocodeFailed {
+                    generation,
+                    message: error.to_string(),
+                },
+            }
+        })
+    }
+
+    fn save_location(&mut self) -> Task<cosmic::Action<Message>> {
+        let trimmed = self.zip_draft.trim().to_string();
+        if trimmed.is_empty() {
+            self.map_error = Some(coldfront_core::Error::InvalidZip.to_string());
+            return Task::none();
+        }
+        if is_us_zip(&trimmed) {
+            self.config.zip = trimmed;
+            self.config.clear_resolved_place();
+            config::save(&self.config);
+            self.geocode_hits.clear();
+            self.geocode_error = None;
+            return self.start_weather_load(true);
+        }
+        let hits_current = self.geocode_hits_query == trimmed;
+        if hits_current && self.geocode_hits.len() == 1 {
+            let place = place_from_geocode_hit(&self.geocode_hits[0]);
+            self.config.apply_place(&place);
+            config::save(&self.config);
+            self.geocode_hits.clear();
+            self.geocode_hits_query.clear();
+            self.geocode_error = None;
+            return self.start_weather_load(true);
+        }
+        if hits_current && self.geocode_hits.len() > 1 {
+            self.geocode_error = Some("choose a city from the list".into());
+            return Task::none();
+        }
+        self.geocode_error = Some("no matching US cities found".into());
+        Task::none()
     }
 
     fn reset_map_state(&mut self) {
@@ -1611,6 +1779,24 @@ fn build_unit_model(fahrenheit: bool) -> segmented_button::SingleSelectModel {
         model.activate(c_id);
     }
     model
+}
+
+fn location_draft(config: &Config) -> String {
+    if !config.city.is_empty() {
+        if config.state_abbreviation.is_empty() {
+            return config.city.clone();
+        }
+        return format!("{}, {}", config.city, config.state_abbreviation);
+    }
+    config.zip.clone()
+}
+
+fn location_changed(previous: &Config, next: &Config) -> bool {
+    previous.zip != next.zip
+        || previous.city != next.city
+        || previous.state_abbreviation != next.state_abbreviation
+        || previous.latitude != next.latitude
+        || previous.longitude != next.longitude
 }
 
 pub(crate) fn basemap_kind(config: &Config) -> BasemapKind {

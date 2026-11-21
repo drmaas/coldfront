@@ -170,6 +170,13 @@
       "icon": "unknown"
     }
   ],
+  "geocode": {
+    "eureka_ca_zip": "95501",
+    "eureka_ca_city": "Eureka",
+    "eureka_ca_state": "CA",
+    "eureka_ca_latitude": 40.80207,
+    "eureka_ca_longitude": -124.16367
+  },
   "zips": {
     "valid": [
       "94110",

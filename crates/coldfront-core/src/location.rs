@@ -35,10 +35,7 @@ pub fn location_path(place: &Place) -> String {
 pub enum RouteTarget {
     Home,
     Zip(String),
-    Coordinates {
-        latitude: f64,
-        longitude: f64,
-    },
+    Coordinates { latitude: f64, longitude: f64 },
 }
 
 /// Parse a Coldfront web pathname into a forecast target.

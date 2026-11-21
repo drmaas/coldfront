@@ -12,8 +12,8 @@ use std::fmt;
 use coldfront_core::{
     Alert, Error, Forecast, HttpClient, MapCamera, MapViewport, Place, RadarFrame, Raster,
     applet_radar_frames, compose_viewport, compose_viewport_ground, compose_viewport_radar_layer,
-    denoise_radar_png, has_resolved_coordinates, iem_tile_url, map_viewport, maptiler_tile_url,
-    is_us_zip, osm_tile_url, scale_raster, tile_camera,
+    denoise_radar_png, has_resolved_coordinates, iem_tile_url, is_us_zip, map_viewport,
+    maptiler_tile_url, osm_tile_url, scale_raster, tile_camera,
 };
 
 /// Compact Radar tab image. Narrower than the popup so zoom controls sit on the map.

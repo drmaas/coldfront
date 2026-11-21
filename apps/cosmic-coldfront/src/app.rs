@@ -416,7 +416,10 @@ impl cosmic::Application for AppModel {
                     self.geocode_error = Some("no matching US cities found".into());
                 }
             }
-            Message::GeocodeFailed { generation, message } => {
+            Message::GeocodeFailed {
+                generation,
+                message,
+            } => {
                 if generation != self.geocode_generation {
                     return Task::none();
                 }
@@ -433,10 +436,7 @@ impl cosmic::Application for AppModel {
                 if is_us_zip(&place.zip) {
                     self.zip_draft.clone_from(&place.zip);
                 } else {
-                    self.zip_draft = format!(
-                        "{}, {}",
-                        place.city, place.state_abbreviation
-                    );
+                    self.zip_draft = format!("{}, {}", place.city, place.state_abbreviation);
                 }
                 self.geocode_hits.clear();
                 self.geocode_error = None;

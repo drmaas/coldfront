@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use cosmic::cosmic_config::{self, CosmicConfigEntry, cosmic_config_derive::CosmicConfigEntry};
 use coldfront_core::{Place, has_resolved_coordinates, is_us_zip};
+use cosmic::cosmic_config::{self, CosmicConfigEntry, cosmic_config_derive::CosmicConfigEntry};
 
 use crate::app::APP_ID;
 

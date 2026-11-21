@@ -6,12 +6,12 @@ use std::fs;
 use std::path::PathBuf;
 
 use coldfront_core::{
-    OrthoFit, applet_radar_frames_at, band_height, chart_points, day_label, describe, display_icon,
-    display_temperature, display_wind_mph, fit_ortho_half_extents, format_as_of, format_clock_time,
-    hour_label, iem_tile_url, is_us_zip, is_zip_lookup, lat_lon_to_tile, location_path, next_hours,
-    parse_alerts, parse_geocode_search, parse_open_meteo, parse_route_path, parse_zippopotam,
-    place_from_geocode_hit, range_placement, round_half_away_from_zero, tile_window,
-    web_radar_frames_at, RouteTarget,
+    OrthoFit, RouteTarget, applet_radar_frames_at, band_height, chart_points, day_label, describe,
+    display_icon, display_temperature, display_wind_mph, fit_ortho_half_extents, format_as_of,
+    format_clock_time, hour_label, iem_tile_url, is_us_zip, is_zip_lookup, lat_lon_to_tile,
+    location_path, next_hours, parse_alerts, parse_geocode_search, parse_open_meteo,
+    parse_route_path, parse_zippopotam, place_from_geocode_hit, range_placement,
+    round_half_away_from_zero, tile_window, web_radar_frames_at,
 };
 use serde_json::Value;
 
@@ -45,13 +45,16 @@ fn geocode_and_location_rules_match_the_contract() {
         place.state_abbreviation,
         geocode["eureka_ca_state"].as_str().unwrap()
     );
-    close(place.latitude, geocode["eureka_ca_latitude"].as_f64().unwrap());
-    close(place.longitude, geocode["eureka_ca_longitude"].as_f64().unwrap());
-    assert_eq!(location_path(&place), format!("/{}", place.zip));
-    assert_eq!(
-        parse_route_path("/95501"),
-        RouteTarget::Zip("95501".into())
+    close(
+        place.latitude,
+        geocode["eureka_ca_latitude"].as_f64().unwrap(),
     );
+    close(
+        place.longitude,
+        geocode["eureka_ca_longitude"].as_f64().unwrap(),
+    );
+    assert_eq!(location_path(&place), format!("/{}", place.zip));
+    assert_eq!(parse_route_path("/95501"), RouteTarget::Zip("95501".into()));
 }
 
 #[test]

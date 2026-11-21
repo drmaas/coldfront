@@ -822,9 +822,7 @@ fn settings_tab(app: &AppModel) -> Element<'_, Message> {
     }
     for (index, hit) in app.geocode_hits.iter().enumerate() {
         let label = format_geocode_label(hit);
-        column = column.push(
-            widget::button::standard(label).on_press(Message::PickGeocode(index)),
-        );
+        column = column.push(widget::button::standard(label).on_press(Message::PickGeocode(index)));
     }
     column
         .push(widget::text::caption(fl!("units")))

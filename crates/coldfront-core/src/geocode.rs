@@ -110,10 +110,7 @@ pub fn format_geocode_label(hit: &GeocodeHit) -> String {
     if let Some(postcode) = hit.postcodes.iter().find(|postcode| is_us_zip(postcode)) {
         format!("{location} ({postcode})")
     } else {
-        format!(
-            "{location} ({:.2}, {:.2})",
-            hit.latitude, hit.longitude
-        )
+        format!("{location} ({:.2}, {:.2})", hit.latitude, hit.longitude)
     }
 }
 

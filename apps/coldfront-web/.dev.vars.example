@@ -1,2 +1,7 @@
-# Copy to .dev.vars for `pnpm run dev`. Leave unset to show radar without a basemap.
+# Copy to .dev.vars for local Wrangler / `pnpm run dev`.
+# MAPTILER_API_KEY is a Worker secret (leave empty for radar without streets).
+# CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN are Wrangler CLI credentials.
+# Wrangler also loads those two from `.env` in this directory for deploy commands.
 MAPTILER_API_KEY=
+CLOUDFLARE_ACCOUNT_ID=
+CLOUDFLARE_API_TOKEN=

@@ -24,7 +24,7 @@ pnpm install
 pnpm run dev
 ```
 
-Open `http://localhost:5173`. Leave `MAPTILER_API_KEY` empty to show radar without streets. `.dev.vars` is gitignored. Do not commit it.
+Open `http://localhost:5173`. Leave `MAPTILER_API_KEY` empty to show radar without streets. `.dev.vars` and `.env` are gitignored. Do not commit them.
 
 Other scripts in that package:
 
@@ -95,17 +95,18 @@ CI on pull requests and on `main` runs web, rust, and secret-scan jobs. A push t
 
 ### From GitHub Actions
 
-A push to `main` that passes web, rust, and gitleaks deploys the Worker. Pull requests and `workflow_dispatch` do not deploy. Set repository secret `CLOUDFLARE_API_TOKEN` first. Prefer an Account API token with Workers **Editor** scoped to Worker `coldfront` ([Workers roles](https://developers.cloudflare.com/workers/authorization/workers/)). Legacy Workers Scripts Edit still deploys today; no kill date yet. Then:
+A push to `main` that passes web, rust, and gitleaks deploys the Worker. Pull requests and `workflow_dispatch` do not deploy. Set repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` first. Prefer an Account API token with Workers **Editor** scoped to Worker `coldfront` ([Workers roles](https://developers.cloudflare.com/workers/authorization/workers/)). Legacy Workers Scripts Edit still deploys today; no kill date yet. Then:
 
 ```bash
 gh secret set CLOUDFLARE_API_TOKEN --repo drmaas/coldfront
+gh secret set CLOUDFLARE_ACCOUNT_ID --repo drmaas/coldfront
 ```
 
-`account_id` is in `apps/coldfront-web/wrangler.jsonc` and is also passed into `wrangler-action`. Keep the API token out of that file. The deploy job rebuilds the web app before `wrangler deploy`, same pattern as a second production build after the CI gate.
+`wrangler-action` receives `accountId` from `CLOUDFLARE_ACCOUNT_ID`. Do not hardcode `account_id` in `wrangler.jsonc`. Keep the API token out of tracked files. The deploy job rebuilds the web app before `wrangler deploy`, same pattern as a second production build after the CI gate.
 
 ### From your machine
 
-From `apps/coldfront-web`, after `pnpm exec wrangler login`:
+From `apps/coldfront-web`, copy `.dev.vars.example` to `.dev.vars` and `.env.example` to `.env`. Fill `CLOUDFLARE_ACCOUNT_ID` (and `CLOUDFLARE_API_TOKEN` if you skip interactive login). Wrangler reads the Cloudflare CLI vars from `.env`. Then:
 
 ```bash
 pnpm exec wrangler secret put MAPTILER_API_KEY
@@ -115,7 +116,7 @@ pnpm run build && pnpm exec wrangler deploy
 Skip the MapTiler secret when the site should serve radar without a street map. The key is not in `wrangler.jsonc`. A missing MapTiler secret must not fail the deploy. Worker secrets survive later deploys.
 
 > [!WARNING]
-> Do not put `MAPTILER_API_KEY` or `CLOUDFLARE_API_TOKEN` in source, `wrangler.jsonc`, or any env file you commit.
+> Do not put `MAPTILER_API_KEY`, `CLOUDFLARE_API_TOKEN`, or `CLOUDFLARE_ACCOUNT_ID` in source, `wrangler.jsonc`, or any env file you commit.
 
 `compatibility_date` is `2026-11-17`. Workers Logs are enabled. Traces are sampled at 1 percent. The Worker name is `coldfront`. Live URL: `https://coldfront.drmaas.workers.dev`.
 

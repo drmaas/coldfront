@@ -8,11 +8,23 @@ The [web app](https://coldfront.fyi) shows current conditions, the next 24 hours
 
 ## Screenshots
 
-Live site at [coldfront.fyi](https://coldfront.fyi), captured during heavy rain in **Crescent City, CA** (ZIP **95531**) with active coastal flood alerts. Radar is in **3D Relief** view (in-app **2D**/**3D** toggle) with a pitched camera angle so the terrain and echo volume read clearly.
+Live [coldfront.fyi](https://coldfront.fyi) and COSMIC applet shots below use **Eureka, CA** (ZIP **95501**) during coastal rain and an NWS **Coastal Flood Watch**. On the web, radar is in **3D Relief** (the **2D**/**3D** toggle) with a pitched camera after tiles load.
+
+### Web
 
 | Desktop (1440×900) | Mobile (390×844, 2×) |
 | --- | --- |
-| ![Coldfront on desktop — Crescent City, CA (95531), rain, flood alerts, and 3D Relief radar](docs/screenshots/web-desktop.png) | ![Coldfront on mobile — Crescent City, CA (95531), rain, flood alerts, and 3D Relief radar](docs/screenshots/web-mobile.png) |
+| ![Coldfront web on desktop — Eureka, CA (95501), rain, flood watch, 3D Relief radar](docs/screenshots/web-desktop.png) | ![Coldfront web on mobile — Eureka, CA (95501), rain, flood watch, 3D Relief radar](docs/screenshots/web-mobile.png) |
+
+### COSMIC applet
+
+Panel popup on the same ZIP — **Radar** tab with reflectivity over the coast, plus the other main tabs.
+
+![COSMIC applet — Eureka, CA (95501), Radar tab during rain](docs/screenshots/applet-radar.png)
+
+| Current | Hourly | Alerts |
+| --- | --- | --- |
+| ![COSMIC applet — Eureka, CA (95501), Current tab](docs/screenshots/applet-current.png) | ![COSMIC applet — Eureka, CA (95501), Hourly tab](docs/screenshots/applet-hourly.png) | ![COSMIC applet — Eureka, CA (95501), Alerts tab](docs/screenshots/applet-alerts.png) |
 
 The two apps do not share a binary. They follow the same display rules. [Architecture](docs/architecture.md) is the design record; [reference](docs/reference.md) holds the field and route tables. [Contributing](CONTRIBUTING.md) covers local setup, tests, deploy, and release.
 

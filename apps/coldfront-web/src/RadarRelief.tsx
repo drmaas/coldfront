@@ -1,10 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type MutableRefObject } from "react";
+import type { BoardTransform } from "./radarCamera";
 import {
   buildEchoField,
   DEFAULT_COLS,
   DEFAULT_ROWS,
   fitOrthoHalfExtents,
   type EchoSample,
+  type ReliefScene,
 } from "./radarRelief";
 
 export interface RadarReliefProps {
@@ -14,6 +16,10 @@ export interface RadarReliefProps {
   /** Table under the heightfield: basemap or plain fill, plus pin. No Flat radar. */
   ground: ImageData | null;
   empty: boolean;
+  /** Live pan/zoom of the last settled board (identity after settle). */
+  boardTransformRef?: MutableRefObject<BoardTransform>;
+  /** Settled scene published sync before the board transform resets. */
+  sceneRef?: MutableRefObject<ReliefScene | null>;
   onRecenterRef?: (recenter: () => void) => void;
 }
 
@@ -33,6 +39,8 @@ export function RadarRelief({
   rows = DEFAULT_ROWS,
   ground,
   empty,
+  boardTransformRef,
+  sceneRef,
   onRecenterRef,
 }: RadarReliefProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -45,9 +53,13 @@ export function RadarRelief({
   const echoesRef = useRef(echoes);
   const gridRef = useRef({ cols, rows });
   const groundRef = useRef(ground);
+  const transformRef = useRef(boardTransformRef);
+  const sceneRefHold = useRef(sceneRef);
   echoesRef.current = echoes;
   gridRef.current = { cols, rows };
   groundRef.current = ground;
+  transformRef.current = boardTransformRef;
+  sceneRefHold.current = sceneRef;
 
   useEffect(() => {
     if (!onRecenterRef) return;
@@ -100,30 +112,39 @@ export function RadarRelief({
       resize();
       const aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight);
       const cam = camera.current;
-      const extent = groundExtent(groundRef.current);
+      const scene = sceneRefHold.current?.current;
+      const currentGround = scene?.ground ?? groundRef.current;
+      const currentEchoes = scene?.echoes ?? echoesRef.current;
+      const grid = scene
+        ? { cols: scene.cols, rows: scene.rows }
+        : gridRef.current;
+      const extent = groundExtent(currentGround);
       const locked =
         Math.abs(cam.yaw - DEFAULT_YAW) < 0.001 && Math.abs(cam.pitch - DEFAULT_PITCH) < 0.001;
       const view = lookAt(cam.yaw, cam.pitch, cam.distance);
       const projection = orthoForBoard(view, extent, aspect, cam.distance, locked);
       const vp = multiply(projection, view);
-      const currentGround = groundRef.current;
       if (currentGround && currentGround !== lastGround) {
         const prevAspect = lastGround && lastGround.height > 0 ? lastGround.width / lastGround.height : 0;
         const nextAspect = currentGround.height > 0 ? currentGround.width / currentGround.height : 0;
-        if (groundTexture) gl.deleteTexture(groundTexture);
-        groundTexture = uploadTexture(gl, currentGround);
-        lastGround = currentGround;
+        // Upload before delete so one frame never draws with a missing ground texture.
+        const nextTexture = uploadTexture(gl, currentGround);
+        if (nextTexture) {
+          if (groundTexture) gl.deleteTexture(groundTexture);
+          groundTexture = nextTexture;
+          lastGround = currentGround;
+        }
         if (Math.abs(prevAspect - nextAspect) > 0.02) {
           camera.current.distance = clamp(fitDistance(extent.width, extent.depth), MIN_DISTANCE, MAX_DISTANCE);
         }
       }
 
-      const currentEchoes = echoesRef.current;
       if (currentEchoes !== lastEchoes) {
+        // Rebuild mesh in place; the previous field stays bound until bufferData replaces it.
         uploadField(
           gl,
           fieldMesh,
-          buildEchoField(currentEchoes, gridRef.current.cols, gridRef.current.rows),
+          buildEchoField(currentEchoes, grid.cols, grid.rows),
           extent,
         );
         lastEchoes = currentEchoes;
@@ -137,6 +158,16 @@ export function RadarRelief({
       gl.uniform2f(locs.uExtent, extent.width, extent.depth);
       gl.uniform1f(locs.uPresent, locked ? 1 : 0);
       gl.uniform3f(locs.uLightDir, -0.48, 0.78, -0.32);
+      const board = transformRef.current?.current ?? { scale: 1, tx: 0, ty: 0 };
+      const stageW = Math.max(1, canvas.clientWidth);
+      const stageH = Math.max(1, canvas.clientHeight);
+      // CSS snapshotTransform → board XZ (same rectangle as Flat).
+      gl.uniform1f(locs.uBoardScale, board.scale);
+      gl.uniform2f(
+        locs.uBoardOffset,
+        extent.width * (board.scale * 0.5 + board.tx / stageW - 0.5),
+        extent.depth * (board.scale * 0.5 + board.ty / stageH - 0.5),
+      );
 
       if (groundTexture) {
         gl.disable(gl.BLEND);
@@ -237,6 +268,8 @@ interface Locs {
   uTexture: WebGLUniformLocation | null;
   uLightDir: WebGLUniformLocation | null;
   uPresent: WebGLUniformLocation | null;
+  uBoardScale: WebGLUniformLocation | null;
+  uBoardOffset: WebGLUniformLocation | null;
 }
 
 function locations(gl: WebGL2RenderingContext, program: WebGLProgram): Locs {
@@ -247,6 +280,8 @@ function locations(gl: WebGL2RenderingContext, program: WebGLProgram): Locs {
     uTexture: gl.getUniformLocation(program, "uTexture"),
     uLightDir: gl.getUniformLocation(program, "uLightDir"),
     uPresent: gl.getUniformLocation(program, "uPresent"),
+    uBoardScale: gl.getUniformLocation(program, "uBoardScale"),
+    uBoardOffset: gl.getUniformLocation(program, "uBoardOffset"),
   };
 }
 
@@ -262,6 +297,8 @@ uniform vec2 uExtent;
 uniform int uMode;
 uniform vec3 uLightDir;
 uniform float uPresent;
+uniform float uBoardScale;
+uniform vec2 uBoardOffset;
 out vec3 vColor;
 out vec2 vUv;
 out float vMode;
@@ -305,6 +342,9 @@ void main() {
     pos = vec3((aPosition.x - 0.5) * 0.016, aPosition.y * mastH + 0.001, (aPosition.z - 0.5) * 0.016);
     color = aPosition.y > 0.85 ? vec3(1.0) : vec3(0.88, 0.12, 0.3);
   }
+  // Pan/zoom the settled board in XZ (mast sits on the ZIP at board origin).
+  pos.x = pos.x * uBoardScale + uBoardOffset.x;
+  pos.z = pos.z * uBoardScale + uBoardOffset.y;
   vec3 normal = normalize(aNormal);
   vec3 light = normalize(uLightDir);
   float ndotl = max(0.0, dot(normal, light));

@@ -1,5 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { iemTileUrl, webRadarFrames } from "../lib/domain";
+import { webRadarFrames } from "../lib/domain";
+import {
+  MAX_ZOOM,
+  MIN_ZOOM,
+  TILE,
+  readView,
+  snapshotTransform,
+  zoomToward,
+  type BoardTransform,
+  type Camera,
+  type View,
+} from "./radarCamera";
 import { RadarRelief } from "./RadarRelief";
 import {
   pinchTargetZoom,
@@ -8,7 +19,19 @@ import {
   RADAR_STAGE_GESTURE,
   touchPoints,
 } from "./radarGestures";
-import { denoiseRadar, echoGrid, sampleEchoes, webgl2Available, type EchoSample } from "./radarRelief";
+import {
+  echoGrid,
+  sampleEchoes,
+  webgl2Available,
+  type EchoSample,
+  type ReliefScene,
+} from "./radarRelief";
+import {
+  fetchViewTiles,
+  placeCachedTiles,
+  prefetchAround,
+  type PlacedTile,
+} from "./radarTiles";
 
 interface RadarMapProps {
   latitude: number;
@@ -16,12 +39,16 @@ interface RadarMapProps {
   basemap: "maptiler" | "none";
 }
 
-const TILE = 256;
-const MIN_ZOOM = 5;
-const MAX_ZOOM = 11;
-const cache = new Map<string, Promise<HTMLImageElement | null>>();
+const SETTLE_MS = 50;
 
 type RadarMode = "flat" | "relief";
+
+interface Snapshot {
+  canvas: HTMLCanvasElement;
+  camera: Camera;
+  cssWidth: number;
+  cssHeight: number;
+}
 
 export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
   const cardRef = useRef<HTMLElement>(null);
@@ -47,27 +74,349 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
   const panRef = useRef(pan);
   const modeRef = useRef(mode);
   const wheelRaf = useRef(0);
+  const blitRaf = useRef(0);
+  const settleTimer = useRef(0);
+  const settleGen = useRef(0);
+  const gesturingRef = useRef(false);
+  const lastGestureAt = useRef(0);
+  const snapshotRef = useRef<Snapshot | null>(null);
+  const boardTransformRef = useRef<BoardTransform>({ scale: 1, tx: 0, ty: 0 });
+  const flatBufferRef = useRef<HTMLCanvasElement | null>(null);
+  const groundBufferRef = useRef<HTMLCanvasElement | null>(null);
+  const reliefSceneRef = useRef<ReliefScene | null>(null);
   const reliefRecenter = useRef<(() => void) | null>(null);
-  const tileZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.floor(zoom)));
   const frame = frames[index] ?? frames[frames.length - 1];
+  const nextFrame = frames[(index + 1) % frames.length] ?? frame;
   const withBasemap = basemap === "maptiler";
   const relief = mode === "relief" && glOk;
-  zoomRef.current = zoom;
-  panRef.current = pan;
+  const settleArgsRef = useRef({
+    latitude,
+    longitude,
+    withBasemap,
+    layer: frame.layer,
+    nextLayer: nextFrame.layer,
+    glOk,
+  });
+  const apiRef = useRef<{
+    scheduleBlit: () => void;
+    scheduleSettle: (ms?: number) => void;
+    onCameraGesture: () => void;
+  }>({
+    scheduleBlit: () => {},
+    scheduleSettle: () => {},
+    onCameraGesture: () => {},
+  });
+  // zoomRef/panRef are the live camera during gestures. Do not write them from
+  // React state here — a stale setState would yank the map back mid-pan.
   modeRef.current = mode;
+  settleArgsRef.current = {
+    latitude,
+    longitude,
+    withBasemap,
+    layer: frame.layer,
+    nextLayer: nextFrame.layer,
+    glOk,
+  };
+
+  const syncReactCamera = () => {
+    setZoom(zoomRef.current);
+    setPan(panRef.current);
+  };
+
+  const applyBoardTransform = () => {
+    const snap = snapshotRef.current;
+    const stage = stageRef.current;
+    if (!snap || !stage) {
+      boardTransformRef.current = { scale: 1, tx: 0, ty: 0 };
+      return;
+    }
+    boardTransformRef.current = snapshotTransform(
+      snap.camera,
+      { zoom: zoomRef.current, pan: panRef.current },
+      stage.clientWidth,
+      stage.clientHeight,
+    );
+  };
+
+  const cameraUnchanged = (camera: Camera) =>
+    camera.zoom === zoomRef.current &&
+    camera.pan.x === panRef.current.x &&
+    camera.pan.y === panRef.current.y;
+
+  const blitGesture = () => {
+    blitRaf.current = 0;
+    applyBoardTransform();
+    if (modeRef.current === "relief" && glOk) return;
+    const canvas = canvasRef.current;
+    const snap = snapshotRef.current;
+    if (!canvas || !snap) return;
+    const cssWidth = canvas.clientWidth;
+    const cssHeight = canvas.clientHeight;
+    if (cssWidth === 0 || cssHeight === 0) return;
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    const width = Math.round(cssWidth * ratio);
+    const height = Math.round(cssHeight * ratio);
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    const { scale, tx, ty } = boardTransformRef.current;
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.fillStyle = "#d5e3ec";
+    context.fillRect(0, 0, width, height);
+    // Scale the device-pixel snapshot in place — no CSS downscale then DPR upscale.
+    context.setTransform(scale, 0, 0, scale, tx * ratio, ty * ratio);
+    context.imageSmoothingEnabled = Math.abs(scale - 1) > 0.001;
+    context.drawImage(snap.canvas, 0, 0);
+  };
+
+  const scheduleBlit = () => {
+    if (!blitRaf.current) blitRaf.current = window.requestAnimationFrame(blitGesture);
+  };
+
+  const ensureBuffer = (
+    slot: { current: HTMLCanvasElement | null },
+    width: number,
+    height: number,
+  ): HTMLCanvasElement => {
+    let canvas = slot.current;
+    if (!canvas) {
+      canvas = document.createElement("canvas");
+      slot.current = canvas;
+    }
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    return canvas;
+  };
+
+  const paintSettled = (
+    canvas: HTMLCanvasElement,
+    view: View,
+    placed: PlacedTile[],
+    wantRelief: boolean,
+  ): { drewRadar: boolean; ground: ImageData | null; echoes: EchoSample[]; cols: number; rows: number } => {
+    const empty = { drewRadar: false, ground: null as ImageData | null, echoes: [] as EchoSample[], cols: 200, rows: 120 };
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return empty;
+    const width = Math.round(view.cssWidth * view.ratio);
+    const height = Math.round(view.cssHeight * view.ratio);
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    context.setTransform(view.ratio * view.scale, 0, 0, view.ratio * view.scale, 0, 0);
+    // Integer zoom: nearest. Fractional zoom: smooth the scaled tiles.
+    context.imageSmoothingEnabled = Math.abs(view.scale - 1) > 0.001;
+    context.fillStyle = "#d5e3ec";
+    context.fillRect(0, 0, view.viewWidth, view.viewHeight);
+    for (const tile of placed) {
+      if (tile.kind === "base" && tile.source) {
+        context.drawImage(tile.source, tile.dx, tile.dy, TILE, TILE);
+      }
+    }
+    const drewRadar = placed.some((tile) => tile.kind === "radar" && tile.source);
+    if (!wantRelief) {
+      // Direct device-res tile blit — no CSS-sized mosaic stretch.
+      for (const tile of placed) {
+        if (tile.kind === "radar" && tile.source) {
+          context.drawImage(tile.source, tile.dx, tile.dy, TILE, TILE);
+        }
+      }
+      drawPin(context, (view.center.x - view.left) * TILE, (view.center.y - view.top) * TILE);
+      return { drewRadar, ground: null, echoes: [], cols: 200, rows: 120 };
+    }
+
+    // Ground = basemap (or fill) + pin only. Radar lives in the heightfield.
+    drawPin(context, (view.center.x - view.left) * TILE, (view.center.y - view.top) * TILE);
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    const ground = context.getImageData(0, 0, canvas.width, canvas.height);
+    const radar = mosaicRadar(placed, view);
+    const grid = radar ? echoGrid(radar.image.width, radar.image.height) : { cols: 200, rows: 120 };
+    const echoes = radar ? sampleEchoes(radar.image, grid.cols, grid.rows) : [];
+    return { drewRadar, ground, echoes, cols: grid.cols, rows: grid.rows };
+  };
+
+  const presentFlat = (view: View, camera: Camera, source: HTMLCanvasElement) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const width = source.width;
+    const height = source.height;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.drawImage(source, 0, 0);
+    const snapCanvas = document.createElement("canvas");
+    snapCanvas.width = width;
+    snapCanvas.height = height;
+    const snapCtx = snapCanvas.getContext("2d");
+    if (!snapCtx) return;
+    snapCtx.drawImage(source, 0, 0);
+    snapshotRef.current = {
+      canvas: snapCanvas,
+      camera: { zoom: camera.zoom, pan: { ...camera.pan } },
+      cssWidth: view.cssWidth,
+      cssHeight: view.cssHeight,
+    };
+    boardTransformRef.current = { scale: 1, tx: 0, ty: 0 };
+  };
+
+  const runSettle = async () => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    // Keep transforming the last snapshot while a finger/wheel is active.
+    if (gesturingRef.current || performance.now() - lastGestureAt.current < SETTLE_MS) {
+      scheduleSettle();
+      return;
+    }
+    const args = settleArgsRef.current;
+    const gen = ++settleGen.current;
+    const cssWidth = stage.clientWidth;
+    const cssHeight = stage.clientHeight;
+    const camera: Camera = { zoom: zoomRef.current, pan: { ...panRef.current } };
+    const view = readView(
+      cssWidth,
+      cssHeight,
+      args.latitude,
+      args.longitude,
+      camera.zoom,
+      camera.pan,
+      window.devicePixelRatio || 1,
+    );
+    if (!view) return;
+    const wantRelief = modeRef.current === "relief" && args.glOk;
+    const hadSnapshot = snapshotRef.current !== null;
+
+    let placed = placeCachedTiles(view, args.withBasemap, args.layer);
+    const missing = placed.some((tile) => tile.source === null);
+    // Never wipe a good frame with pale holes — fetch first, then paint once.
+    if (missing) {
+      await fetchViewTiles(view, args.withBasemap, args.layer);
+      if (gen !== settleGen.current) return;
+      if (!cameraUnchanged(camera)) {
+        scheduleSettle(0);
+        return;
+      }
+      placed = placeCachedTiles(view, args.withBasemap, args.layer);
+    }
+
+    const width = Math.round(view.cssWidth * view.ratio);
+    const height = Math.round(view.cssHeight * view.ratio);
+    const flatTarget = ensureBuffer(flatBufferRef, width, height);
+    const result = wantRelief
+      ? paintSettled(ensureBuffer(groundBufferRef, width, height), view, placed, true)
+      : paintSettled(flatTarget, view, placed, false);
+    if (wantRelief) paintSettled(flatTarget, view, placed, false);
+    if (gen !== settleGen.current) return;
+    if (!cameraUnchanged(camera)) {
+      scheduleSettle(0);
+      return;
+    }
+
+    if (!result.drewRadar && hadSnapshot) {
+      // Keep the previous snapshot on screen; do not paint pale holes over it.
+      prefetchAround(
+        cssWidth,
+        cssHeight,
+        args.latitude,
+        args.longitude,
+        camera.zoom,
+        camera.pan,
+        args.withBasemap,
+        args.layer,
+        args.nextLayer,
+        window.devicePixelRatio || 1,
+      );
+      return;
+    }
+
+    // Relief: publish the new board before identity transform so WebGL never
+    // draws the previous ground at the new camera for a frame.
+    if (wantRelief && result.ground) {
+      reliefSceneRef.current = {
+        ground: result.ground,
+        echoes: result.echoes,
+        cols: result.cols,
+        rows: result.rows,
+      };
+      setEchoes(result.echoes);
+      setEchoCols(result.cols);
+      setEchoRows(result.rows);
+      setGround(result.ground);
+    }
+    presentFlat(view, camera, flatTarget);
+
+    if (result.drewRadar) {
+      setReady(true);
+      setFailed(false);
+    } else if (!hadSnapshot) {
+      setFailed(true);
+      if (wantRelief) {
+        setEchoes([]);
+        setGround(null);
+      }
+    }
+
+    prefetchAround(
+      cssWidth,
+      cssHeight,
+      args.latitude,
+      args.longitude,
+      camera.zoom,
+      camera.pan,
+      args.withBasemap,
+      args.layer,
+      args.nextLayer,
+      window.devicePixelRatio || 1,
+    );
+  };
+
+  const scheduleSettle = (ms = SETTLE_MS) => {
+    window.clearTimeout(settleTimer.current);
+    settleTimer.current = window.setTimeout(() => {
+      const quiet = performance.now() - lastGestureAt.current;
+      if (quiet < ms) {
+        scheduleSettle(ms);
+        return;
+      }
+      gesturingRef.current = false;
+      void runSettle();
+    }, ms);
+  };
+
+  const onCameraGesture = () => {
+    gesturingRef.current = true;
+    lastGestureAt.current = performance.now();
+    scheduleBlit();
+    if (!wheelRaf.current) {
+      wheelRaf.current = window.requestAnimationFrame(() => {
+        wheelRaf.current = 0;
+        syncReactCamera();
+      });
+    }
+    scheduleSettle();
+  };
+
+  apiRef.current = { scheduleBlit, scheduleSettle, onCameraGesture };
 
   useEffect(() => {
     setReady(false);
     setFailed(false);
+    panRef.current = { x: 0, y: 0 };
     setPan({ x: 0, y: 0 });
     setEchoes([]);
     setGround(null);
+    reliefSceneRef.current = null;
+    snapshotRef.current = null;
+    boardTransformRef.current = { scale: 1, tx: 0, ty: 0 };
   }, [latitude, longitude, basemap]);
-
-  useEffect(() => {
-    setReady(false);
-    setFailed(false);
-  }, [tileZoom]);
 
   useEffect(() => {
     if (!glOk && mode === "relief") setMode("flat");
@@ -112,14 +461,24 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
 
+  // Settle on place, frame, size, mode — not on every pan/zoom tick.
+  useEffect(() => {
+    window.clearTimeout(settleTimer.current);
+    if (gesturingRef.current) {
+      scheduleSettle();
+      return undefined;
+    }
+    void runSettle();
+    return () => {
+      settleGen.current += 1;
+      window.clearTimeout(settleTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- gesture settle uses scheduleSettle
+  }, [latitude, longitude, frame.layer, withBasemap, sizeTick, relief, index]);
+
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return undefined;
-    const flushWheel = () => {
-      wheelRaf.current = 0;
-      setZoom(zoomRef.current);
-      setPan(panRef.current);
-    };
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
       const rect = stage.getBoundingClientRect();
@@ -145,16 +504,15 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
         );
         zoomRef.current = next.zoom;
         panRef.current = next.pan;
-        if (!wheelRaf.current) wheelRaf.current = window.requestAnimationFrame(flushWheel);
+        apiRef.current.onCameraGesture();
         return;
       }
       panRef.current = { x: panRef.current.x - event.deltaX, y: panRef.current.y - event.deltaY };
-      if (!wheelRaf.current) wheelRaf.current = window.requestAnimationFrame(flushWheel);
+      apiRef.current.onCameraGesture();
     };
     stage.addEventListener("wheel", onWheel, { passive: false });
     return () => {
       stage.removeEventListener("wheel", onWheel);
-      if (wheelRaf.current) window.cancelAnimationFrame(wheelRaf.current);
     };
   }, []);
 
@@ -172,7 +530,6 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
     };
     let pinch: Pinch | null = null;
     let gestureRaf = 0;
-    // Touch Events own phone/touchscreen when they fire; Pointer fallback if they do not.
     let touchOwns = false;
     const touchPointers = new Map<number, Point>();
     let mouseDrag: { pointerId: number; x: number; y: number; panX: number; panY: number } | null =
@@ -183,12 +540,13 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
 
     const flushPanZoom = () => {
       gestureRaf = 0;
-      setZoom(zoomRef.current);
-      setPan(panRef.current);
+      syncReactCamera();
     };
 
     const scheduleFlush = () => {
       if (!gestureRaf) gestureRaf = window.requestAnimationFrame(flushPanZoom);
+      apiRef.current.scheduleBlit();
+      apiRef.current.scheduleSettle();
     };
 
     const beginPinch = (pts: Point[]) => {
@@ -268,7 +626,6 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
       touchPointers.clear();
       const pts = touchPoints(event.touches);
       if (pts.length >= 2) {
-        // Stop browser page-zoom before the gesture commits (Safari/Chrome).
         event.preventDefault();
         beginPinch(pts);
         return;
@@ -312,7 +669,6 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
 
       if (event.pointerType === "touch") {
         if (touchOwns) return;
-        // No setPointerCapture — capture drops the second finger on Safari/Android.
         touchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
         if (touchPointers.size === 1) beginOneFingerPan({ x: event.clientX, y: event.clientY });
         else if (touchPointers.size >= 2) beginPinch([...touchPointers.values()]);
@@ -391,6 +747,7 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
       stage.removeEventListener("pointerup", endPointer);
       stage.removeEventListener("pointercancel", endPointer);
       if (gestureRaf) window.cancelAnimationFrame(gestureRaf);
+      if (blitRaf.current) window.cancelAnimationFrame(blitRaf.current);
       pinch = null;
       mouseDrag = null;
       touchOwns = false;
@@ -398,51 +755,6 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
       drag.current = null;
     };
   }, []);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return undefined;
-    let cancelled = false;
-    void paint(
-      canvas,
-      latitude,
-      longitude,
-      zoom,
-      pan,
-      frame.layer,
-      withBasemap,
-      relief ? "relief" : "flat",
-      () => !cancelled,
-    ).then((result) => {
-      if (cancelled) return;
-      if (result.drewRadar) {
-        setReady(true);
-        setFailed(false);
-        if (relief) {
-          setEchoes(result.echoes);
-          setEchoCols(result.cols);
-          setEchoRows(result.rows);
-          setGround(result.ground);
-        }
-      } else {
-        setFailed(true);
-        if (relief) {
-          setEchoes([]);
-          setGround(null);
-        }
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [latitude, longitude, zoom, pan, frame.layer, withBasemap, sizeTick, relief]);
-
-  useEffect(() => {
-    if (!relief) return;
-    setReady(false);
-    setEchoes([]);
-    setGround(null);
-  }, [relief]);
 
   async function toggleFullscreen() {
     const card = cardRef.current;
@@ -462,6 +774,7 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
       const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, target));
       zoomRef.current = next;
       setZoom(next);
+      apiRef.current.onCameraGesture();
       return;
     }
     const next = zoomToward(
@@ -477,12 +790,14 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
     panRef.current = next.pan;
     setZoom(next.zoom);
     setPan(next.pan);
+    apiRef.current.onCameraGesture();
   }
 
   function recenter() {
     panRef.current = { x: 0, y: 0 };
     setPan({ x: 0, y: 0 });
     reliefRecenter.current?.();
+    apiRef.current.onCameraGesture();
   }
 
   return (
@@ -507,6 +822,8 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
             rows={echoRows}
             ground={ground}
             empty={echoes.length === 0}
+            boardTransformRef={boardTransformRef}
+            sceneRef={reliefSceneRef}
             onRecenterRef={(fn) => {
               reliefRecenter.current = fn;
             }}
@@ -589,178 +906,31 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
   );
 }
 
-function zoomToward(
-  currentZoom: number,
-  nextZoom: number,
-  originX: number,
-  originY: number,
-  width: number,
-  height: number,
-  pan: { x: number; y: number },
-): { zoom: number; pan: { x: number; y: number } } {
-  const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextZoom));
-  if (zoom === currentZoom) return { zoom, pan };
-  const factor = 2 ** (zoom - currentZoom);
-  return {
-    zoom,
-    pan: {
-      x: factor * (width / 2 + pan.x - originX) - width / 2 + originX,
-      y: factor * (height / 2 + pan.y - originY) - height / 2 + originY,
-    },
-  };
-}
-
-interface PaintResult {
-  drewRadar: boolean;
-  ground: ImageData | null;
-  echoes: EchoSample[];
-  cols: number;
-  rows: number;
-}
-
-async function paint(
-  canvas: HTMLCanvasElement,
-  latitude: number,
-  longitude: number,
-  zoom: number,
-  pan: { x: number; y: number },
-  layer: string,
-  withBasemap: boolean,
-  mode: RadarMode,
-  active: () => boolean,
-): Promise<PaintResult> {
-  const empty: PaintResult = { drewRadar: false, ground: null, echoes: [], cols: 200, rows: 120 };
-  const view = readView(canvas, latitude, longitude, zoom, pan);
-  if (!view) return empty;
-  const tiles: Array<Promise<Placed>> = [];
-  forEachTile(view, (url, dx, dy, kind) => {
-    tiles.push(place(url, dx, dy, kind));
-  }, withBasemap, layer);
-  const placed = await Promise.all(tiles);
-  if (!active()) return empty;
-  const context = prepareCanvas(canvas, view);
-  if (!context) return empty;
-
-  const drewRadar = placed.some((tile) => tile.kind === "radar" && tile.image);
-  const radar = filteredRadar(placed, view, canvas.width, canvas.height);
-  if (mode === "flat") {
-    context.fillStyle = "#d5e3ec";
-    context.fillRect(0, 0, view.viewWidth, view.viewHeight);
-    for (const tile of placed) {
-      if (tile.kind === "base" && tile.image) context.drawImage(tile.image, tile.dx, tile.dy, TILE, TILE);
-    }
-    if (radar) {
-      context.save();
-      context.setTransform(1, 0, 0, 1, 0, 0);
-      context.drawImage(radar.canvas, 0, 0);
-      context.restore();
-    }
-    drawPin(context, (view.center.x - view.left) * TILE, (view.center.y - view.top) * TILE);
-    return { drewRadar, ground: null, echoes: [], cols: 200, rows: 120 };
-  }
-
-  // Ground = table under the heightfield: basemap (or plain) + pin. No Flat radar underlay.
-  context.fillStyle = "#d5e3ec";
-  context.fillRect(0, 0, view.viewWidth, view.viewHeight);
-  for (const tile of placed) {
-    if (tile.kind === "base" && tile.image) context.drawImage(tile.image, tile.dx, tile.dy, TILE, TILE);
-  }
-  drawPin(context, (view.center.x - view.left) * TILE, (view.center.y - view.top) * TILE);
-  context.setTransform(1, 0, 0, 1, 0, 0);
-  const ground = context.getImageData(0, 0, canvas.width, canvas.height);
-  const grid = radar ? echoGrid(radar.image.width, radar.image.height) : { cols: 200, rows: 120 };
-  const echoes = radar ? sampleEchoes(radar.image, grid.cols, grid.rows) : [];
-  return { drewRadar, ground, echoes, cols: grid.cols, rows: grid.rows };
-}
-
-function filteredRadar(
-  placed: Placed[],
+/** Device-pixel radar mosaic for echo sampling (relief). Tiles stay sharp on Flat via direct blit. */
+function mosaicRadar(
+  placed: PlacedTile[],
   view: View,
-  width: number,
-  height: number,
 ): { canvas: HTMLCanvasElement; image: ImageData } | null {
-  if (width <= 0 || height <= 0) return null;
+  const width = Math.max(1, Math.round(view.cssWidth * view.ratio));
+  const height = Math.max(1, Math.round(view.cssHeight * view.ratio));
   const radarCanvas = document.createElement("canvas");
   radarCanvas.width = width;
   radarCanvas.height = height;
   const radarContext = radarCanvas.getContext("2d", { willReadFrequently: true });
   if (!radarContext) return null;
   radarContext.setTransform(view.ratio * view.scale, 0, 0, view.ratio * view.scale, 0, 0);
+  radarContext.imageSmoothingEnabled = Math.abs(view.scale - 1) > 0.001;
   radarContext.clearRect(0, 0, view.viewWidth, view.viewHeight);
+  let drew = false;
   for (const tile of placed) {
-    if (tile.kind === "radar" && tile.image) radarContext.drawImage(tile.image, tile.dx, tile.dy, TILE, TILE);
+    if (tile.kind !== "radar" || !tile.source) continue;
+    radarContext.drawImage(tile.source, tile.dx, tile.dy, TILE, TILE);
+    drew = true;
   }
+  if (!drew) return null;
   radarContext.setTransform(1, 0, 0, 1, 0, 0);
   const image = radarContext.getImageData(0, 0, width, height);
-  denoiseRadar(image);
-  radarContext.putImageData(image, 0, 0);
   return { canvas: radarCanvas, image };
-}
-
-interface View {
-  cssWidth: number;
-  cssHeight: number;
-  viewWidth: number;
-  viewHeight: number;
-  ratio: number;
-  scale: number;
-  tileZoom: number;
-  center: { x: number; y: number };
-  left: number;
-  top: number;
-}
-
-function readView(
-  canvas: HTMLCanvasElement,
-  latitude: number,
-  longitude: number,
-  zoom: number,
-  pan: { x: number; y: number },
-): View | null {
-  const cssWidth = canvas.clientWidth;
-  const cssHeight = canvas.clientHeight;
-  if (cssWidth === 0 || cssHeight === 0) return null;
-  const ratio = Math.min(window.devicePixelRatio || 1, 2);
-  const tileZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.floor(zoom)));
-  const scale = 2 ** (zoom - tileZoom);
-  const viewWidth = cssWidth / scale;
-  const viewHeight = cssHeight / scale;
-  const center = project(latitude, longitude, tileZoom);
-  const left = center.x - viewWidth / 2 / TILE - pan.x / scale / TILE;
-  const top = center.y - viewHeight / 2 / TILE - pan.y / scale / TILE;
-  return { cssWidth, cssHeight, viewWidth, viewHeight, ratio, scale, tileZoom, center, left, top };
-}
-
-function prepareCanvas(canvas: HTMLCanvasElement, view: View): CanvasRenderingContext2D | null {
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) return null;
-  canvas.width = Math.round(view.cssWidth * view.ratio);
-  canvas.height = Math.round(view.cssHeight * view.ratio);
-  context.setTransform(view.ratio * view.scale, 0, 0, view.ratio * view.scale, 0, 0);
-  context.imageSmoothingEnabled = true;
-  return context;
-}
-
-function forEachTile(
-  view: View,
-  emit: (url: string, dx: number, dy: number, kind: "base" | "radar") => void,
-  withBasemap: boolean,
-  layer: string,
-): void {
-  const x0 = Math.floor(view.left);
-  const y0 = Math.floor(view.top);
-  const x1 = Math.floor(view.left + view.viewWidth / TILE);
-  const y1 = Math.floor(view.top + view.viewHeight / TILE);
-  const limit = 2 ** view.tileZoom;
-  for (let x = x0; x <= x1; x += 1) {
-    for (let y = y0; y <= y1; y += 1) {
-      if (x < 0 || y < 0 || x >= limit || y >= limit) continue;
-      const dx = (x - view.left) * TILE;
-      const dy = (y - view.top) * TILE;
-      if (withBasemap) emit(`/api/map/${view.tileZoom}/${x}/${y}.png`, dx, dy, "base");
-      emit(iemTileUrl(layer, view.tileZoom, x, y), dx, dy, "radar");
-    }
-  }
 }
 
 function drawPin(context: CanvasRenderingContext2D, x: number, y: number) {
@@ -780,43 +950,4 @@ function drawPin(context: CanvasRenderingContext2D, x: number, y: number) {
   context.fillStyle = "#fff";
   context.fill();
   context.restore();
-}
-
-interface Placed {
-  image: HTMLImageElement | null;
-  dx: number;
-  dy: number;
-  kind: "base" | "radar";
-}
-
-function place(url: string, dx: number, dy: number, kind: Placed["kind"]): Promise<Placed> {
-  return loadImage(url).then((image) => ({ image, dx, dy, kind }));
-}
-
-function loadImage(url: string): Promise<HTMLImageElement | null> {
-  const cached = cache.get(url);
-  if (cached) return cached;
-  const pending = new Promise<HTMLImageElement | null>((resolve) => {
-    const image = new Image();
-    if (!url.startsWith("/")) image.crossOrigin = "anonymous";
-    image.onload = () => resolve(image);
-    image.onerror = () => {
-      cache.delete(url);
-      resolve(null);
-    };
-    image.src = url;
-  });
-  cache.set(url, pending);
-  return pending.then((image) => {
-    if (!image) cache.delete(url);
-    return image;
-  });
-}
-
-function project(latitude: number, longitude: number, zoom: number): { x: number; y: number } {
-  const tiles = 2 ** zoom;
-  const x = ((longitude + 180) / 360) * tiles;
-  const radians = (latitude * Math.PI) / 180;
-  const y = ((1 - Math.log(Math.tan(radians) + 1 / Math.cos(radians)) / Math.PI) / 2) * tiles;
-  return { x, y };
 }

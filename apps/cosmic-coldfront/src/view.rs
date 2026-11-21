@@ -286,12 +286,13 @@ fn current_tab(app: &AppModel) -> Element<'_, Message> {
                 display_icon(info.icon, forecast.current.is_day),
                 56.0,
             ))
-            .push(widget::text::title1(format!("{temp}°{}", app.unit_suffix())))
-            .push(
-                widget::text::body(info.label)
-                    .width(Length::Fill)
-                    .class(cosmic::style::Text::Color(Color::from_rgb(0.45, 0.48, 0.52))),
-            ),
+            .push(widget::text::title1(format!(
+                "{temp}°{}",
+                app.unit_suffix()
+            )))
+            .push(widget::text::body(info.label).width(Length::Fill).class(
+                cosmic::style::Text::Color(Color::from_rgb(0.45, 0.48, 0.52)),
+            )),
     );
 
     if let Some(high_low) = high_low {
@@ -550,7 +551,9 @@ fn hourly_tab(app: &AppModel) -> Element<'_, Message> {
             .width(Length::Fixed(HOUR_COLUMN))
             .align_x(Alignment::Center);
         if low_pop {
-            pop_label = pop_label.class(cosmic::style::Text::Color(Color::from_rgb(0.55, 0.58, 0.62)));
+            pop_label = pop_label.class(cosmic::style::Text::Color(Color::from_rgb(
+                0.55, 0.58, 0.62,
+            )));
         }
         icons = icons.push(
             widget::Column::new()

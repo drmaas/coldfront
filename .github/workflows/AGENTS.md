@@ -17,7 +17,7 @@ Do not put product behavior here.
 - `web` uses `pnpm/setup@v3` in `apps/coldfront-web` with Node LTS, store cache, and a frozen lockfile. Order is install, `pnpm exec wrangler types --include-runtime false --check`, lint, typecheck, test, build.
 - `rust` installs the COSMIC build libraries, then runs fmt, `cargo clippy --all-targets --locked -- -D warnings`, and `cargo test --workspace --locked`. Do not add a separate applet `cargo build` after those steps; clippy and tests already compile the workspace.
 - `secrets` runs gitleaks `v8.30.1` with `--redact`. Checkout uses `fetch-depth: 0`.
-- `deploy` needs `web`, `rust`, and `secrets`. It runs only when `github.event_name == 'push'` and the ref is `main`. It rebuilds the web app, then deploys with `cloudflare/wrangler-action@v4`. It needs repository secret `CLOUDFLARE_API_TOKEN`. Pull requests and `workflow_dispatch` never reach this job.
+- `deploy` needs `web`, `rust`, and `secrets`. It runs only when `github.event_name == 'push'` and the ref is `main`. It rebuilds the web app, then deploys with `cloudflare/wrangler-action@v4`. It needs repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Pull requests and `workflow_dispatch` never reach this job.
 
 `release-arch.yml` runs only on a push of a `v*` tag. It needs `permissions: contents: write`. The job uses the `archlinux:latest` container.
 
@@ -25,9 +25,9 @@ Do not put product behavior here.
 
 - Keep CI and Arch release in separate files. Do not build the Arch package on pull requests.
 - Keep the Worker deploy job in `ci.yml`. Do not add a second workflow that uses `workflow_run`.
-- Do not put `CLOUDFLARE_API_TOKEN` on `web`, `rust`, or `secrets`. Only the `deploy` job may reference it.
+- Do not put `CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_ACCOUNT_ID` on `web`, `rust`, or `secrets`. Only the `deploy` job may reference them.
 - Keep `ci.yml` free of `contents: write`. The `deploy` job may use `deployments: write` for `gitHubToken`.
-- Deploy uses `cloudflare/wrangler-action@v4` from `apps/coldfront-web` after `pnpm run build`. Pass `accountId` to the action (same value as `wrangler.jsonc`) so the action does not blank `CLOUDFLARE_ACCOUNT_ID`.
+- Deploy uses `cloudflare/wrangler-action@v4` from `apps/coldfront-web` after `pnpm run build`. Pass `accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}` so the action does not blank the env var. Do not hardcode `account_id` in `wrangler.jsonc`.
 - Deploy concurrency group is `coldfront-production` with `cancel-in-progress: false`.
 - Web stays on pnpm and Node LTS (`pnpm/setup` with `runtime: node@lts`). Rust stays on `dtolnay/rust-toolchain@stable` with rustfmt and clippy.
 - Cargo invocations in CI stay `--locked`. The PKGBUILD stays `--frozen`.
@@ -47,7 +47,7 @@ Do not put product behavior here.
 - `check-version.sh` exits 1 on a version mismatch and exits 2 when the tag argument is missing. The release stops before `makepkg`.
 - gitleaks exits non-zero when it finds a secret. Do not add `--no-git` or a skip that hides tracked history.
 - A missing `.pkg.tar.zst` fails the artifact upload. Do not set `if-no-files-found` to `warn` or `ignore`.
-- Deploy fails when `CLOUDFLARE_API_TOKEN` is missing or lacks Workers Editor on Worker `coldfront`.
+- Deploy fails when `CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_ACCOUNT_ID` is missing, or when the token lacks Workers Editor on Worker `coldfront`.
 
 ## Example
 

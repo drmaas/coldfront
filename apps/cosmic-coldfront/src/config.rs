@@ -5,7 +5,7 @@ use cosmic::cosmic_config::{self, CosmicConfigEntry, cosmic_config_derive::Cosmi
 
 use crate::app::APP_ID;
 
-#[derive(Debug, Clone, CosmicConfigEntry, Eq, PartialEq)]
+#[derive(Debug, Clone, CosmicConfigEntry, PartialEq)]
 #[version = 1]
 pub struct Config {
     pub zip: String,

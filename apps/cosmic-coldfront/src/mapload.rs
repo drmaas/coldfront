@@ -9,9 +9,9 @@ use std::collections::HashMap;
 use std::fmt;
 
 use coldfront_core::{
-    Alert, Error, Forecast, HttpClient, MapCamera, MapViewport, Place, RadarFrame,
-    applet_radar_frames, compose_viewport, iem_tile_url, map_viewport, maptiler_tile_url,
-    osm_tile_url,
+    Alert, Error, Forecast, HttpClient, MapCamera, MapViewport, Place, RadarFrame, Raster,
+    applet_radar_frames, compose_viewport, compose_viewport_ground, compose_viewport_radar_layer,
+    iem_tile_url, map_viewport, maptiler_tile_url, osm_tile_url,
 };
 
 /// Compact Radar tab image. Narrower than the popup so zoom controls sit on the map.
@@ -258,6 +258,57 @@ pub fn compose_cached(
         pixels: raster.pixels,
         radar_tiles,
     })
+}
+
+/// Basemap (or pale fill) plus pin, and a radar-only layer for Relief sampling.
+pub fn compose_relief_layers(
+    cache: &TileCache,
+    kind: &BasemapKind,
+    viewport: &MapViewport,
+    offset_minutes: u32,
+) -> Result<(Raster, Raster, usize), Error> {
+    let basemap_layer = match kind {
+        BasemapKind::MapTiler(_) => Some(TileLayer::MapTiler),
+        BasemapKind::Osm => Some(TileLayer::Osm),
+        BasemapKind::None => None,
+    };
+    let radar_layer = TileLayer::Radar { offset_minutes };
+    let coords = viewport.tile_coords();
+    let mut basemap = Vec::with_capacity(coords.len());
+    let mut radar = Vec::with_capacity(coords.len());
+    let mut radar_tiles = 0usize;
+    for &(x, y) in &coords {
+        if let Some(layer) = basemap_layer {
+            let key = TileKey {
+                layer,
+                zoom: viewport.zoom,
+                x,
+                y,
+            };
+            match cache.get(key) {
+                None | Some(None) => basemap.push(None),
+                Some(Some(bytes)) => basemap.push(Some(bytes.clone())),
+            }
+        } else {
+            basemap.push(None);
+        }
+        let key = TileKey {
+            layer: radar_layer,
+            zoom: viewport.zoom,
+            x,
+            y,
+        };
+        match cache.get(key) {
+            None | Some(None) => radar.push(None),
+            Some(Some(bytes)) => {
+                radar_tiles += 1;
+                radar.push(Some(bytes.clone()));
+            }
+        }
+    }
+    let ground = compose_viewport_ground(viewport, &basemap)?;
+    let radar_layer = compose_viewport_radar_layer(viewport, &radar)?;
+    Ok((ground, radar_layer, radar_tiles))
 }
 
 async fn fill_viewport_tiles(

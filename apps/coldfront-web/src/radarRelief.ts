@@ -333,6 +333,12 @@ function bandFor(
   return null;
 }
 
+/** Band height for a known RGB sample, or null when the color is not wet n0q. */
+export function bandHeight(r: number, g: number, b: number): number | null {
+  const band = bandFor(r, g, b);
+  return band ? band.height : null;
+}
+
 /** Match a view frustum to the canvas aspect. Cover fills the stage; contain letterboxes. */
 export function fitOrthoHalfExtents(
   halfW: number,

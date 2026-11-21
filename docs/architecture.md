@@ -57,7 +57,7 @@ Web page: current conditions, next 24 hours, 10-day list, radar, up to three ale
 
 Change a shared rule in Rust, TypeScript, and `fixtures/contract.json` in one change. Both contract tests load the same fixtures. See [Contract lock](reference.md#contract-lock) for the full rule table.
 
-Shared chart helpers: `chart_points` / `chartPoints`, `range_placement` / `rangePlacement`. Shared day/night icons: `display_icon` / `displayIcon`. Stay in Rust: `compose_radar_map`, `compose_viewport`, `HttpClient`, `symbolic_icon`.
+Shared chart helpers: `chart_points` / `chartPoints`, `range_placement` / `rangePlacement`. Shared day/night icons: `display_icon` / `displayIcon`. Shared relief sample and band rules: `coldfront-core` relief module and `radarRelief.ts`. Stay in Rust: `compose_radar_map`, `compose_viewport`, `render_relief`, `HttpClient`, `symbolic_icon`.
 
 ## Data flow
 
@@ -130,7 +130,7 @@ Config version 1: `zip`, `fahrenheit` (default true), `maptiler_api_key`, `allow
 
 ## Radar and basemap
 
-Both clients draw IEM MRMS hybrid-scan reflectivity tiles (`q2-hsr` / `mrms::lcref`). Web uses a 2D canvas by default (zoom 5–11, twelve frames at 750 ms). When WebGL2 is available, a Relief toggle rebuilds those same frames as a heightfield on a basemap (or plain) board — same pan, zoom, and fullscreen as Flat; Shift-drag or right-drag orbits. The Flat radar picture is not drawn under the mesh. Missing WebGL2 leaves the toggle off. Applet Radar tab composites into a viewport that matches the map widget (about 400×220 when compact; larger when expanded), with zoom 5–11, pan/zoom gestures, offsets 50…0, and an 800 ms loop while the Radar tab is open. Zoom and expand controls overlay the map, inset from the top-right; the frame slider stays below. `compose_radar_map` (400×260) remains for contract tests. Frame lists and layer names: [Radar](reference.md#radar).
+Both clients draw IEM MRMS hybrid-scan reflectivity tiles (`q2-hsr` / `mrms::lcref`). Web uses a 2D canvas by default (zoom 5–11, twelve frames at 750 ms). When WebGL2 is available, a Relief toggle rebuilds those same frames as a heightfield on a basemap (or plain) board — same pan, zoom, and fullscreen as Flat; Shift-drag or right-drag orbits. The Flat radar picture is not drawn under the mesh. Missing WebGL2 leaves the toggle off. Applet Radar tab composites into a viewport that matches the map widget (about 400×220 when compact; larger when expanded), with zoom 5–11, pan/zoom gestures, offsets 50…0, and an 800 ms loop while the Radar tab is open. A session-only 2D / 3D control switches the same tiles into a CPU-rasterized relief heightfield in `coldfront-core` (shared sample and band rules with the web). Shift-drag or right-drag orbits; recenter restores the locked camera. Zoom, mode, and expand controls overlay the map, inset from the top-right; the frame slider stays below. `compose_radar_map` (400×260) remains for contract tests. Frame lists and layer names: [Radar](reference.md#radar).
 
 ```mermaid
 flowchart TD

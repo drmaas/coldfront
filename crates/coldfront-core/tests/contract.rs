@@ -6,10 +6,11 @@ use std::fs;
 use std::path::PathBuf;
 
 use coldfront_core::{
-    applet_radar_frames_at, chart_points, day_label, describe, display_icon, display_temperature,
-    display_wind_mph, format_as_of, format_clock_time, hour_label, iem_tile_url, is_us_zip,
-    lat_lon_to_tile, next_hours, parse_alerts, parse_open_meteo, parse_zippopotam, range_placement,
-    round_half_away_from_zero, tile_window, web_radar_frames_at,
+    OrthoFit, applet_radar_frames_at, band_height, chart_points, day_label, describe, display_icon,
+    display_temperature, display_wind_mph, fit_ortho_half_extents, format_as_of, format_clock_time,
+    hour_label, iem_tile_url, is_us_zip, lat_lon_to_tile, next_hours, parse_alerts,
+    parse_open_meteo, parse_zippopotam, range_placement, round_half_away_from_zero, tile_window,
+    web_radar_frames_at,
 };
 use serde_json::Value;
 
@@ -346,4 +347,36 @@ fn radar_tiles_and_frames_match_the_contract() {
         contract["applet_first_offset"].as_u64().unwrap() as u32
     );
     assert_eq!(applet.last().unwrap().label, "Latest scan");
+}
+
+#[test]
+fn relief_bands_and_ortho_match_the_contract() {
+    let relief = &contract()["relief"];
+    for band in relief["bands"].as_array().unwrap() {
+        let height = band_height(
+            band["r"].as_u64().unwrap() as u8,
+            band["g"].as_u64().unwrap() as u8,
+            band["b"].as_u64().unwrap() as u8,
+        )
+        .expect("band");
+        close(f64::from(height), band["height"].as_f64().unwrap());
+    }
+    let cover = &relief["fit_cover"];
+    let (half_w, half_h) = fit_ortho_half_extents(
+        cover["half_w"].as_f64().unwrap() as f32,
+        cover["half_h"].as_f64().unwrap() as f32,
+        cover["aspect"].as_f64().unwrap() as f32,
+        OrthoFit::Cover,
+    );
+    close(f64::from(half_w), cover["out_half_w"].as_f64().unwrap());
+    close(f64::from(half_h), cover["out_half_h"].as_f64().unwrap());
+    let contain = &relief["fit_contain"];
+    let (half_w, half_h) = fit_ortho_half_extents(
+        contain["half_w"].as_f64().unwrap() as f32,
+        contain["half_h"].as_f64().unwrap() as f32,
+        contain["aspect"].as_f64().unwrap() as f32,
+        OrthoFit::Contain,
+    );
+    close(f64::from(half_w), contain["out_half_w"].as_f64().unwrap());
+    close(f64::from(half_h), contain["out_half_h"].as_f64().unwrap());
 }

@@ -23,7 +23,7 @@ Do not treat the web app and the applet as one program. They do not share a bina
 
 - Keep shared display rules in `crates/coldfront-core` and `apps/coldfront-web/lib/domain.ts`. Do not put those rules only in a React component or an iced view.
 - When you change ZIP checks, parsers, rounding, labels, chart math, tile math, IEM URLs, or radar frame lists, change Rust, TypeScript, and `fixtures/contract.json` in the same change. Both contract tests must pass.
-- Keep chart helpers (`chart_points` / `chartPoints`, `range_placement` / `rangePlacement`) and day/night icons (`display_icon` / `displayIcon`) in Rust and TypeScript together. Leave applet compositing (`compose_radar_map`, `compose_viewport`) and `symbolic_icon` in Rust.
+- Keep chart helpers (`chart_points` / `chartPoints`, `range_placement` / `rangePlacement`) and day/night icons (`display_icon` / `displayIcon`) in Rust and TypeScript together. Keep relief band and ortho rules in `coldfront-core` and `radarRelief.ts` together. Leave applet compositing (`compose_radar_map`, `compose_viewport`, `render_relief`) and `symbolic_icon` in Rust.
 - Request Open-Meteo in Celsius and km/h with `forecast_days=10`. Convert only at display time.
 - Round display values half away from zero. `-1.5` becomes `-2`. Non-finite input becomes `0`.
 - A US ZIP code is five ASCII digits. Leading zeros count. Reject ZIP+4.
@@ -41,7 +41,7 @@ Do not treat the web app and the applet as one program. They do not share a bina
 
 | Change | Edit |
 | --- | --- |
-| Shared parse, units, chart math, tile math, frame lists | `crates/coldfront-core` and `apps/coldfront-web/lib/domain.ts`, then `fixtures/contract.json` |
+| Shared parse, units, chart math, tile math, frame lists, relief bands | `crates/coldfront-core` and `apps/coldfront-web/lib/domain.ts` (relief helpers stay in `radarRelief.ts`), then `fixtures/contract.json` |
 | Worker routes, cache, upstream URLs | `apps/coldfront-web/lib/server/proxy.ts` and `worker/index.ts` |
 | Web page behavior | `apps/coldfront-web/src` |
 | Applet popup behavior | `apps/cosmic-coldfront/src/app.rs` |

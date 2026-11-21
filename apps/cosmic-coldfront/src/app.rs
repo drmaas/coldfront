@@ -83,6 +83,8 @@ pub struct AppModel {
     pub(crate) map_loading: bool,
     pub(crate) radar_tiles: usize,
     pub(crate) shown_offset: u32,
+    /// Playback frame to apply on the next settle when a gesture is in progress.
+    deferred_shown_offset: Option<u32>,
     pub(crate) playing: bool,
     pub(crate) zoom: f64,
     pub(crate) pan_x: f64,
@@ -166,6 +168,7 @@ pub enum Message {
     MapScroll(ScrollDelta),
     MapSettle(u64),
     PrefetchDone {
+        generation: u64,
         cache: Box<TileCache>,
     },
     ScaleFactor(f64),
@@ -252,6 +255,7 @@ impl cosmic::Application for AppModel {
             map_loading: false,
             radar_tiles: 0,
             shown_offset: 0,
+            deferred_shown_offset: None,
             playing: true,
             zoom: 7.0,
             pan_x: 0.0,
@@ -524,11 +528,14 @@ impl cosmic::Application for AppModel {
             Message::MapSettle(token) => {
                 if token == self.settle_token {
                     self.gesturing = false;
+                    self.apply_deferred_shown_offset();
                     return self.refresh_visible_map();
                 }
             }
-            Message::PrefetchDone { cache } => {
-                self.tile_cache.absorb(&cache);
+            Message::PrefetchDone { generation, cache } => {
+                if prefetch_absorb_allowed(generation, self.map_generation) {
+                    self.tile_cache.absorb(&cache);
+                }
             }
             Message::ScaleFactor(scale) => {
                 let next = scale.clamp(1.0, 2.0);
@@ -745,6 +752,9 @@ impl AppModel {
     }
 
     fn apply_radar_size_change(&mut self) -> Task<cosmic::Action<Message>> {
+        let (view_width, view_height) = self.map_size();
+        self.settled_width = view_width;
+        self.settled_height = view_height;
         self.settle_now()
     }
 
@@ -1164,6 +1174,9 @@ impl AppModel {
             return;
         };
         let painted = render_relief(ground, field, &self.relief_camera);
+        let (view_width, view_height) = self.map_size();
+        self.settled_width = view_width;
+        self.settled_height = view_height;
         self.map_handle = Some(cosmic::iced::widget::image::Handle::from_rgba(
             painted.width,
             painted.height,
@@ -1262,11 +1275,21 @@ impl AppModel {
             .position(|offset| *offset == self.shown_offset)
             .unwrap_or(0);
         let next = (index + 1) % sequence.len();
-        self.shown_offset = sequence[next];
-        if self.gesturing {
+        let next_offset = sequence[next];
+        let (next_shown, deferred) =
+            playback_advance_during_gesture(self.gesturing, self.shown_offset, next_offset);
+        if let Some(offset) = deferred {
+            self.deferred_shown_offset = Some(offset);
             return self.schedule_settle();
         }
+        self.shown_offset = next_shown;
         self.settle_now()
+    }
+
+    fn apply_deferred_shown_offset(&mut self) {
+        if let Some(offset) = self.deferred_shown_offset.take() {
+            self.shown_offset = offset;
+        }
     }
 
     fn nudge_zoom(&mut self, steps: f64) -> Task<cosmic::Action<Message>> {
@@ -1371,6 +1394,7 @@ impl AppModel {
     fn settle_now(&mut self) -> Task<cosmic::Action<Message>> {
         self.gesturing = false;
         self.settle_token = self.settle_token.wrapping_add(1);
+        self.apply_deferred_shown_offset();
         self.refresh_visible_map()
     }
 
@@ -1399,10 +1423,12 @@ impl AppModel {
         } else {
             None
         };
+        let generation = self.map_generation;
         let mut cache = self.tile_cache.clone();
         cosmic::task::future(async move {
             let Ok(client) = HttpClient::new() else {
                 return Message::PrefetchDone {
+                    generation,
                     cache: Box::new(cache),
                 };
             };
@@ -1419,6 +1445,7 @@ impl AppModel {
             };
             mapload::prefetch_around(&client, &mut cache, &kind, &request, next_offset).await;
             Message::PrefetchDone {
+                generation,
                 cache: Box::new(cache),
             }
         })
@@ -1604,14 +1631,48 @@ pub(crate) fn basemap_kind(config: &Config) -> BasemapKind {
     }
 }
 
+pub(crate) fn prefetch_absorb_allowed(task_generation: u64, current_generation: u64) -> bool {
+    task_generation == current_generation
+}
+
+pub(crate) fn playback_advance_during_gesture(
+    gesturing: bool,
+    shown_offset: u32,
+    next_offset: u32,
+) -> (u32, Option<u32>) {
+    if gesturing {
+        (shown_offset, Some(next_offset))
+    } else {
+        (next_offset, None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::format_panel_temperature;
+    use super::{
+        format_panel_temperature, playback_advance_during_gesture, prefetch_absorb_allowed,
+    };
 
     #[test]
     fn panel_temperature_includes_unit() {
         assert_eq!(format_panel_temperature(11.666_666_666_7, true), "53°F");
         assert_eq!(format_panel_temperature(12.4, false), "12°C");
         assert_eq!(format_panel_temperature(-1.5, false), "-2°C");
+    }
+
+    #[test]
+    fn prefetch_ignores_stale_generation() {
+        assert!(prefetch_absorb_allowed(2, 2));
+        assert!(!prefetch_absorb_allowed(1, 2));
+    }
+
+    #[test]
+    fn playback_defers_offset_while_gesturing() {
+        let (shown, deferred) = playback_advance_during_gesture(true, 50, 40);
+        assert_eq!(shown, 50);
+        assert_eq!(deferred, Some(40));
+        let (shown, deferred) = playback_advance_during_gesture(false, 50, 40);
+        assert_eq!(shown, 40);
+        assert_eq!(deferred, None);
     }
 }

@@ -21,6 +21,7 @@ pub const MAP_VIEW_WIDTH: u32 = 400;
 pub const MAP_VIEW_HEIGHT: u32 = 220;
 const TILE_MARGIN: u32 = 1;
 const DENOISE_CAP: usize = 512;
+const BASEMAP_CAP: usize = 256;
 
 #[derive(Clone)]
 pub enum BasemapKind {
@@ -76,12 +77,15 @@ pub struct TileCache {
     tiles: HashMap<TileKey, Option<Vec<u8>>>,
     /// Insertion order for denoised radar tiles (LRU eviction at [`DENOISE_CAP`]).
     denoise_order: VecDeque<TileKey>,
+    /// Insertion order for basemap tiles (LRU eviction at [`BASEMAP_CAP`]).
+    basemap_order: VecDeque<TileKey>,
 }
 
 impl TileCache {
     pub fn clear(&mut self) {
         self.tiles.clear();
         self.denoise_order.clear();
+        self.basemap_order.clear();
     }
 
     /// Keep successful tiles from `other` without dropping entries already cached.
@@ -92,10 +96,14 @@ impl TileCache {
         for (key, value) in &other.tiles {
             if let Some(bytes) = value {
                 let is_radar = matches!(key.layer, TileLayer::Radar { .. });
+                let is_basemap = matches!(key.layer, TileLayer::MapTiler | TileLayer::Osm);
                 let already = matches!(self.tiles.get(key), Some(Some(_)));
                 self.tiles.insert(*key, Some(bytes.clone()));
                 if is_radar && !already {
                     self.touch_denoise(*key);
+                }
+                if is_basemap && !already {
+                    self.touch_basemap(*key);
                 }
             }
         }
@@ -107,9 +115,13 @@ impl TileCache {
 
     fn insert_ok(&mut self, key: TileKey, bytes: Vec<u8>) {
         let is_radar = matches!(key.layer, TileLayer::Radar { .. });
+        let is_basemap = matches!(key.layer, TileLayer::MapTiler | TileLayer::Osm);
         self.tiles.insert(key, Some(bytes));
         if is_radar {
             self.touch_denoise(key);
+        }
+        if is_basemap {
+            self.touch_basemap(key);
         }
     }
 
@@ -122,6 +134,30 @@ impl TileCache {
             };
             self.tiles.remove(&oldest);
         }
+    }
+
+    fn touch_basemap(&mut self, key: TileKey) {
+        self.basemap_order.retain(|item| *item != key);
+        self.basemap_order.push_back(key);
+        while self.basemap_order.len() > BASEMAP_CAP {
+            let Some(oldest) = self.basemap_order.pop_front() else {
+                break;
+            };
+            self.tiles.remove(&oldest);
+        }
+    }
+
+    /// Store fetched tile bytes, denoising radar tiles once. Denoise failure leaves
+    /// the key absent so the next settle retries.
+    fn store_fetched(&mut self, key: TileKey, bytes: Vec<u8>, denoise: bool) {
+        if denoise {
+            let Some(stored) = denoise_radar_png(&bytes) else {
+                return;
+            };
+            self.insert_ok(key, stored);
+            return;
+        }
+        self.insert_ok(key, bytes);
     }
 
     /// True when the cache has no successful tile yet (absent or prior miss).
@@ -489,11 +525,57 @@ async fn fill_viewport_tiles(
         let Some(bytes) = bytes else {
             continue;
         };
-        let stored = if denoise {
-            denoise_radar_png(&bytes).unwrap_or(bytes)
-        } else {
-            bytes
-        };
-        cache.insert_ok(key, stored);
+        cache.store_fetched(key, bytes, denoise);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn basemap_key(x: u32) -> TileKey {
+        TileKey {
+            layer: TileLayer::MapTiler,
+            zoom: 7,
+            x,
+            y: 0,
+        }
+    }
+
+    fn radar_key(x: u32) -> TileKey {
+        TileKey {
+            layer: TileLayer::Radar { offset_minutes: 0 },
+            zoom: 7,
+            x,
+            y: 0,
+        }
+    }
+
+    #[test]
+    fn basemap_cache_evicts_at_cap() {
+        let mut cache = TileCache::default();
+        for x in 0..BASEMAP_CAP + 4 {
+            cache.insert_ok(basemap_key(x as u32), vec![x as u8]);
+        }
+        assert!(cache.get(basemap_key(0)).is_none());
+        assert!(cache.get(basemap_key(3)).is_none());
+        assert!(cache.get(basemap_key(4)).is_some());
+        assert!(cache.get(basemap_key((BASEMAP_CAP + 3) as u32)).is_some());
+    }
+
+    #[test]
+    fn denoise_failure_does_not_cache_radar_tile() {
+        let mut cache = TileCache::default();
+        let key = radar_key(1);
+        cache.store_fetched(key, b"not-a-png".to_vec(), true);
+        assert!(!matches!(cache.get(key), Some(Some(_))));
+    }
+
+    #[test]
+    fn radar_and_basemap_lru_are_independent() {
+        let mut cache = TileCache::default();
+        cache.insert_ok(basemap_key(0), vec![1]);
+        cache.insert_ok(radar_key(0), vec![2]);
+        assert_eq!(cache.tiles.len(), 2);
     }
 }

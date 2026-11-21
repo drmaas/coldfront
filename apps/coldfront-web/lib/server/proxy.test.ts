@@ -21,6 +21,12 @@ describe("api proxy", () => {
     expect(zip.type).toBe("upstream");
     if (zip.type === "upstream") expect(zip.upstream.url).toBe("https://api.zippopotam.us/us/55115");
     expect(planApi(new URL("https://coldfront.local/api/zip/nope"), undefined)).toMatchObject({ status: 400 });
+    const geocode = planApi(new URL("https://coldfront.local/api/geocode/search?name=Eureka"), undefined);
+    expect(geocode.type).toBe("upstream");
+    if (geocode.type === "upstream") {
+      expect(geocode.upstream.url).toContain("geocoding-api.open-meteo.com");
+      expect(geocode.upstream.url).toContain("countryCode=US");
+    }
 
     const forecast = planApi(
       new URL("https://coldfront.local/api/forecast?latitude=45.071&longitude=-92.9391"),

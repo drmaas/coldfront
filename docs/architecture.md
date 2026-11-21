@@ -2,7 +2,7 @@
 
 Design record for Coldfront. If this file and the code disagree, fix the code or update this file in the same change. Setup and release live in [CONTRIBUTING.md](../CONTRIBUTING.md). Dense tables (Open-Meteo fields, WMO codes, Worker routes, radar frames) live in [reference.md](reference.md).
 
-Coldfront is two clients and no shared backend. A person enters a US ZIP code. Each client resolves that ZIP, loads a forecast and active alerts, and draws MRMS radar. Neither client has accounts, stores a forecast on a server, or calls the other client.
+Coldfront is two clients and no shared backend. A person enters a US ZIP code or city name. Five digits still resolve through Zippopotam. Anything else runs an Open-Meteo geocoding search limited to the US. Each client then loads a forecast and active alerts, and draws MRMS radar. Neither client has accounts, stores a forecast on a server, or calls the other client.
 
 ```mermaid
 flowchart LR
@@ -18,6 +18,7 @@ flowchart LR
   Worker["Cloudflare Worker<br/>/api/*"]
 
   Zip["Zippopotam"]
+  Geo["Open-Meteo geocoding"]
   OM["Open-Meteo"]
   NWS["api.weather.gov"]
   MT["MapTiler"]
@@ -30,11 +31,13 @@ flowchart LR
 
   Web --> Worker
   Worker --> Zip
+  Worker --> Geo
   Worker --> OM
   Worker --> NWS
   Worker --> MT
 
   Applet --> Zip
+  Applet --> Geo
   Applet --> OM
   Applet --> NWS
   Applet --> MT
@@ -114,7 +117,7 @@ sequenceDiagram
 
 ### Web path (short)
 
-Routes are `/` and `/:zip` via `history.pushState` (no router library). Units live in `localStorage` under `coldfront-units`; changing units re-renders and does not fetch.
+Routes are `/`, `/:zip`, and `/@{lat},{lon}` via `history.pushState` (no router library). A chosen city with a known ZIP still uses `/:zip`. Otherwise the coordinate path stores the place in `localStorage` under `coldfront-place` for reloads and links. Units live in `localStorage` under `coldfront-units`; changing units re-renders and does not fetch.
 
 `loadForecast`: ZIP + config together, then forecast + alerts together. Forecast failure rejects the page. Non-OK alerts become `[]`. Alerts JSON that fails `parseAlerts` still rejects the page. Browser never sees the MapTiler key. Worker adds the NWS-required User-Agent.
 
@@ -126,7 +129,7 @@ App id `io.github.drmaas.CosmicColdfront`. `init` reads cosmic-config and does n
 
 Popup tabs are Current, Radar, Hourly, and 10-day. Settings and Alerts open from the header (not tab-bar segments). Every tab uses a fixed 480×440 popup. The popup fill is opaque. The panel button window stays transparent. Radar Full screen asks the Wayland popup to grow toward the monitor (`set_size` on the popup, not a toplevel resize) and Restore returns it to 480×440 beside the panel. Invalid ZIP bumps `generation`, clears place and forecast, and returns with no network. Alert HTTP failure becomes an empty list. A failed same-ZIP refresh keeps the last forecast. Stale `generation` / `map_generation` results are ignored.
 
-Config version 1: `zip`, `fahrenheit` (default true), `maptiler_api_key`, `allow_osm_basemap` (default false). Unit changes save without reload. ZIP changes refetch weather. Key and OSM toggle reload the map after the Radar tab has been opened.
+Config version 1: `zip`, saved city coordinates (`city`, `state_abbreviation`, `latitude`, `longitude`), `fahrenheit` (default true), `maptiler_api_key`, `allow_osm_basemap` (default false). ZIP-only configs still load. Unit changes save without reload. Location changes refetch weather. Key and OSM toggle reload the map after the Radar tab has been opened.
 
 ## Radar and basemap
 

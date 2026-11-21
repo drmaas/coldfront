@@ -98,6 +98,120 @@ export function isUsZip(value: string): boolean {
   return /^\d{5}$/.test(value);
 }
 
+export interface GeocodeHit {
+  name: string;
+  admin1: string;
+  stateAbbreviation: string;
+  latitude: number;
+  longitude: number;
+  postcodes: string[];
+}
+
+const US_STATE_ABBREVIATIONS: Record<string, string> = {
+  Alabama: "AL",
+  Alaska: "AK",
+  Arizona: "AZ",
+  Arkansas: "AR",
+  California: "CA",
+  Colorado: "CO",
+  Connecticut: "CT",
+  Delaware: "DE",
+  "District of Columbia": "DC",
+  Florida: "FL",
+  Georgia: "GA",
+  Hawaii: "HI",
+  Idaho: "ID",
+  Illinois: "IL",
+  Indiana: "IN",
+  Iowa: "IA",
+  Kansas: "KS",
+  Kentucky: "KY",
+  Louisiana: "LA",
+  Maine: "ME",
+  Maryland: "MD",
+  Massachusetts: "MA",
+  Michigan: "MI",
+  Minnesota: "MN",
+  Mississippi: "MS",
+  Missouri: "MO",
+  Montana: "MT",
+  Nebraska: "NE",
+  Nevada: "NV",
+  "New Hampshire": "NH",
+  "New Jersey": "NJ",
+  "New Mexico": "NM",
+  "New York": "NY",
+  "North Carolina": "NC",
+  "North Dakota": "ND",
+  Ohio: "OH",
+  Oklahoma: "OK",
+  Oregon: "OR",
+  Pennsylvania: "PA",
+  "Rhode Island": "RI",
+  "South Carolina": "SC",
+  "South Dakota": "SD",
+  Tennessee: "TN",
+  Texas: "TX",
+  Utah: "UT",
+  Vermont: "VT",
+  Virginia: "VA",
+  Washington: "WA",
+  "West Virginia": "WV",
+  Wisconsin: "WI",
+  Wyoming: "WY",
+};
+
+export function stateAbbreviation(admin1: string): string {
+  return US_STATE_ABBREVIATIONS[admin1] ?? admin1;
+}
+
+export function parseGeocodeSearch(body: unknown): GeocodeHit[] {
+  const value = record(body, "geocode response");
+  if (!Array.isArray(value.results)) return [];
+  const hits: GeocodeHit[] = [];
+  for (const entry of value.results) {
+    if (!isRecord(entry)) continue;
+    if (text(entry, "country_code") !== "US") continue;
+    const name = text(entry, "name");
+    if (!name) continue;
+    const admin1 = text(entry, "admin1");
+    const latitude = typeof entry.latitude === "number" ? entry.latitude : NaN;
+    const longitude = typeof entry.longitude === "number" ? entry.longitude : NaN;
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
+    const postcodes = Array.isArray(entry.postcodes)
+    ? entry.postcodes.filter((item): item is string => typeof item === "string")
+    : [];
+    hits.push({
+      name,
+      admin1,
+      stateAbbreviation: stateAbbreviation(admin1),
+      latitude,
+      longitude,
+      postcodes,
+    });
+  }
+  return hits;
+}
+
+export function placeFromGeocodeHit(hit: GeocodeHit): Place {
+  const zip = hit.postcodes.find((postcode) => isUsZip(postcode)) ?? "";
+  return {
+    zip,
+    city: hit.name,
+    state: hit.admin1,
+    stateAbbreviation: hit.stateAbbreviation,
+    latitude: hit.latitude,
+    longitude: hit.longitude,
+  };
+}
+
+export function formatGeocodeLabel(hit: GeocodeHit): string {
+  const zip = hit.postcodes.find((postcode) => isUsZip(postcode));
+  const location = `${hit.name}, ${hit.stateAbbreviation || hit.admin1}`;
+  if (zip) return `${location} (${zip})`;
+  return `${location} (${hit.latitude.toFixed(2)}, ${hit.longitude.toFixed(2)})`;
+}
+
 export function roundHalfAwayFromZero(value: number): number {
   if (!Number.isFinite(value)) return 0;
   if (value >= 0) return Math.floor(value + 0.5);

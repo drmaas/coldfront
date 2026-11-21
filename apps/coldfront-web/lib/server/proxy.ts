@@ -32,6 +32,17 @@ export function planApi(url: URL, maptilerKey: string | undefined): ApiPlan {
   if (path === "/api/zip" || path.startsWith("/api/zip/")) {
     return text(400, "enter a 5-digit US ZIP code");
   }
+  if (path === "/api/geocode/search") {
+    const name = url.searchParams.get("name")?.trim() ?? "";
+    if (!name || name.length > 64) return text(400, "enter a city name to search");
+    const target = new URL("https://geocoding-api.open-meteo.com/v1/search");
+    target.searchParams.set("name", name);
+    target.searchParams.set("countryCode", "US");
+    target.searchParams.set("count", "8");
+    target.searchParams.set("language", "en");
+    target.searchParams.set("format", "json");
+    return upstream(target.toString(), "public, max-age=86400", "json");
+  }
   if (path === "/api/forecast") {
     const latitude = numberParam(url, "latitude", -90, 90);
     const longitude = numberParam(url, "longitude", -180, 180);

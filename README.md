@@ -2,7 +2,7 @@
 
 ![Coldfront](images/readme-icon.svg)
 
-Coldfront shows US weather for a ZIP code. The license is GPL-3.0-only.
+Coldfront shows US weather for a ZIP code or city name. The license is GPL-3.0-only.
 
 The web app shows current conditions, the next 24 hours, a 10-day forecast, live NEXRAD radar, and active National Weather Service alerts. The COSMIC applet shows current conditions, the radar image, and those alerts in a panel popup.
 
@@ -25,6 +25,7 @@ Forecasts are requested in Celsius and km/h. The app converts them for display. 
 | Source | Use | Credential |
 | --- | --- | --- |
 | [Zippopotam.us](https://api.zippopotam.us) | ZIP code to city and coordinates | none |
+| [Open-Meteo geocoding](https://open-meteo.com/en/docs/geocoding-api) | US city search | none |
 | [Open-Meteo](https://open-meteo.com/) | Current, hourly, and daily forecast | none |
 | [api.weather.gov](https://www.weather.gov/documentation/services-web-api) | Active alerts | none; a User-Agent is required |
 | [Iowa Environmental Mesonet](https://mesonet.agron.iastate.edu/GIS/ridge.phtml) | MRMS hybrid-scan reflectivity tiles | none |

@@ -3,6 +3,7 @@
 use crate::alerts::Alert;
 use crate::error::Error;
 use crate::forecast::Forecast;
+use crate::geocode::{GeocodeHit, geocode_url, parse_geocode_search};
 use crate::place::Place;
 use crate::zipcode::is_us_zip;
 
@@ -55,6 +56,15 @@ impl HttpClient {
             .get_bytes(&format!("https://api.zippopotam.us/us/{zip}"))
             .await?;
         crate::place::parse_zippopotam(&bytes)
+    }
+
+    pub async fn search_cities(&self, query: &str) -> Result<Vec<GeocodeHit>, Error> {
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            return Ok(Vec::new());
+        }
+        let bytes = self.get_bytes(&geocode_url(trimmed, 8)).await?;
+        parse_geocode_search(&bytes)
     }
 
     pub async fn forecast(&self, latitude: f64, longitude: f64) -> Result<Forecast, Error> {

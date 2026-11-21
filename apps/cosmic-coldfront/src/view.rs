@@ -30,13 +30,26 @@ const RANGE_TRACK: Color = Color::from_rgb(0.902, 0.910, 0.925);
 const RANGE_COOL: Color = Color::from_rgb(0.490, 0.827, 0.988);
 const RANGE_WARM: Color = Color::from_rgb(0.961, 0.620, 0.043);
 
+/// Panel temperature type role by panel size tier (matches Tempest).
+fn panel_text(size: cosmic::applet::Size, label: String) -> Element<'static, Message> {
+    use cosmic::applet::Size;
+    use cosmic::applet::cosmic_panel_config::PanelSize;
+    match size {
+        Size::PanelSize(p) => match p {
+            PanelSize::XL => widget::text::title1(label).into(),
+            PanelSize::L => widget::text::title2(label).into(),
+            PanelSize::M => widget::text::title3(label).into(),
+            _ => widget::text::heading(label).into(),
+        },
+        _ => widget::text::heading(label).into(),
+    }
+}
+
 pub fn panel(app: &AppModel) -> Element<'_, Message> {
     let is_horizontal = app.core.applet.is_horizontal();
     let suggested_size = app.core.applet.suggested_size(true);
     let applet_padding = app.core.applet.suggested_padding(true);
-    // Cosmic symbolic SVGs sit flush to the viewBox; inset so AppletIcon
-    // focus/hover chrome does not clip the glyph.
-    let icon_size = suggested_size.0.saturating_sub(2).max(12);
+    let icon_size = suggested_size.0.max(12);
 
     let mut children: Vec<Element<'_, Message>> = Vec::new();
     if !app.alerts.is_empty() {
@@ -54,14 +67,7 @@ pub fn panel(app: &AppModel) -> Element<'_, Message> {
             .into(),
     );
     if let Some(temp) = app.panel_temperature() {
-        children.push(
-            app.core
-                .applet
-                .text(temp)
-                .height(Length::Fixed(f32::from(suggested_size.1)))
-                .align_y(Alignment::Center)
-                .into(),
-        );
+        children.push(panel_text(app.core.applet.size.clone(), temp));
     }
 
     let readout: Element<'_, Message> = if is_horizontal {

@@ -8,11 +8,11 @@ The [web app](https://coldfront.fyi) shows current conditions, the next 24 hours
 
 ## Screenshots
 
-Live site at [coldfront.fyi](https://coldfront.fyi), captured during heavy rain in **Crescent City, CA** (ZIP **95531**) with active coastal flood alerts.
+Live site at [coldfront.fyi](https://coldfront.fyi), captured during heavy rain in **Crescent City, CA** (ZIP **95531**) with active coastal flood alerts. Radar is in **3D Relief** view (in-app **2D**/**3D** toggle) with a pitched camera angle so the terrain and echo volume read clearly.
 
 | Desktop (1440×900) | Mobile (390×844, 2×) |
 | --- | --- |
-| ![Coldfront on desktop — Crescent City, CA (95531), rain and flood alerts](docs/screenshots/web-desktop.png) | ![Coldfront on mobile — Crescent City, CA (95531), rain and flood alerts](docs/screenshots/web-mobile.png) |
+| ![Coldfront on desktop — Crescent City, CA (95531), rain, flood alerts, and 3D Relief radar](docs/screenshots/web-desktop.png) | ![Coldfront on mobile — Crescent City, CA (95531), rain, flood alerts, and 3D Relief radar](docs/screenshots/web-mobile.png) |
 
 The two apps do not share a binary. They follow the same display rules. [Architecture](docs/architecture.md) is the design record; [reference](docs/reference.md) holds the field and route tables. [Contributing](CONTRIBUTING.md) covers local setup, tests, deploy, and release.
 

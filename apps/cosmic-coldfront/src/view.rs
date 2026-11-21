@@ -439,25 +439,10 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
         fl!("tooltip-radar-relief")
     };
 
-    let mode_button = widget::tooltip::tooltip(
-        widget::button::text(mode_label)
-            .on_press(Message::ToggleRadarMode)
-            .width(Length::Fixed(MAP_CONTROL_SIZE))
-            .height(Length::Fixed(MAP_CONTROL_SIZE))
-            .class(if relief {
-                cosmic::theme::Button::Suggested
-            } else {
-                map_control_button_class()
-            }),
-        widget::text::body(mode_tip),
-        widget::tooltip::Position::Left,
-    )
-    .gap(4);
-
     let zoom_controls = widget::Column::new()
         .spacing(0)
         .width(Length::Fixed(MAP_CONTROL_SIZE))
-        .push(mode_button)
+        .push(map_mode_button(mode_label, mode_tip, relief))
         .push(widget::divider::horizontal::default())
         .push(map_button(
             "list-add-symbolic",
@@ -877,7 +862,7 @@ fn map_button(icon: &'static str, message: Message, tip: String) -> Element<'sta
             .width(Length::Fixed(MAP_CONTROL_SIZE))
             .height(Length::Fixed(MAP_CONTROL_SIZE))
             .padding(8)
-            .class(map_control_button_class()),
+            .class(map_control_button_class(false)),
         widget::text::body(tip),
         widget::tooltip::Position::Left,
     )
@@ -885,12 +870,32 @@ fn map_button(icon: &'static str, message: Message, tip: String) -> Element<'sta
     .into()
 }
 
-fn map_control_button_class() -> cosmic::theme::Button {
+fn map_mode_button(label: String, tip: String, active: bool) -> Element<'static, Message> {
+    let label = widget::container(widget::text::caption(label))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill);
+    widget::tooltip::tooltip(
+        widget::button::custom(label)
+            .on_press(Message::ToggleRadarMode)
+            .width(Length::Fixed(MAP_CONTROL_SIZE))
+            .height(Length::Fixed(MAP_CONTROL_SIZE))
+            .padding(0)
+            .class(map_control_button_class(active)),
+        widget::text::body(tip),
+        widget::tooltip::Position::Left,
+    )
+    .gap(4)
+    .into()
+}
+
+fn map_control_button_class(accent: bool) -> cosmic::theme::Button {
     cosmic::theme::Button::Custom {
-        active: Box::new(|focused, theme| map_control_style(theme, focused, false)),
-        disabled: Box::new(|theme| map_control_style(theme, false, true)),
-        hovered: Box::new(|focused, theme| map_control_style(theme, focused, false)),
-        pressed: Box::new(|focused, theme| map_control_style(theme, focused, false)),
+        active: Box::new(move |focused, theme| map_control_style(theme, focused, false, accent)),
+        disabled: Box::new(move |theme| map_control_style(theme, false, true, accent)),
+        hovered: Box::new(move |focused, theme| map_control_style(theme, focused, false, accent)),
+        pressed: Box::new(move |focused, theme| map_control_style(theme, focused, false, accent)),
     }
 }
 
@@ -898,10 +903,15 @@ fn map_control_style(
     theme: &cosmic::Theme,
     focused: bool,
     disabled: bool,
+    accent: bool,
 ) -> cosmic::widget::button::Style {
     let cosmic = theme.cosmic();
     let surface = cosmic.background(false);
-    let mut on = Color::from(surface.on);
+    let mut on = if accent {
+        Color::from(cosmic.accent_color())
+    } else {
+        Color::from(surface.on)
+    };
     if disabled {
         on.a *= 0.5;
     }

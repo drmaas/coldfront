@@ -21,6 +21,7 @@ Change a shared rule in Rust, in TypeScript, and in `fixtures/contract.json` in 
 | IEM tile URL and radar frame lists | `iem_tile_url`, `web_radar_frames`, `applet_radar_frames` | yes |
 | HTTP to upstream hosts | `HttpClient` or the Worker | no |
 | Painted map | `compose_radar_map`, `compose_viewport`, or `RadarMap.tsx` | no |
+| Relief echo bands and ortho fit | `band_height` / `bandHeight`, `fit_ortho_half_extents` / `fitOrthoHalfExtents` | yes |
 | Hourly chart and daily range bar | `chart_points` / `chartPoints`, `range_placement` / `rangePlacement` | yes |
 | Panel icon names | `symbolic_icon` | no |
 
@@ -133,7 +134,9 @@ Until the first frame draws radar pixels, the card says "Loading radar…". If t
 
 ### Applet
 
-The Radar tab uses `map_viewport` and `compose_viewport`. The camera starts at zoom 7 with zero pan. Zoom stays from 5 to 11. Drag pans. Mouse wheel zooms. Trackpad pixel scroll pans; Ctrl plus scroll zooms. Zoom in/out, recenter, and expand/restore buttons overlay the map (same idea as the web). The timeline and play control sit under the map. Compact view size is 400 by 220 inside the 480×440 popup; expanded view size follows the monitor-sized popup minus chrome. Tiles are cached by source, zoom, and coordinates. Every pan/zoom recomposites basemap and radar together from whatever tiles are already cached (missing cells stay holes), matching the web canvas paint path. A 50 ms settle debounce fetches newly visible edge tiles for the shown frame and every frame already ready, without blanking the map. Failed tile fetches stay absent so the next settle can retry. Stale fetch tasks still merge successful tiles into the cache.
+The Radar tab uses `map_viewport` and `compose_viewport`. The camera starts at zoom 7 with zero pan. Zoom stays from 5 to 11. Drag pans. Mouse wheel zooms. Trackpad pixel scroll pans; Ctrl plus scroll zooms. Zoom in/out, recenter, expand/restore, and a 2D / 3D mode toggle overlay the map (same idea as the web). The timeline and play control sit under the map. Compact view size is 400 by 220 inside the 480×440 popup; expanded view size follows the monitor-sized popup minus chrome. Tiles are cached by source, zoom, and coordinates. Every pan/zoom recomposites basemap and radar together from whatever tiles are already cached (missing cells stay holes), matching the web canvas paint path. A 50 ms settle debounce fetches newly visible edge tiles for the shown frame and every frame already ready, without blanking the map. Failed tile fetches stay absent so the next settle can retry. Stale fetch tasks still merge successful tiles into the cache.
+
+Relief mode (session only; default is Flat) paints through `compose_viewport_ground`, `compose_viewport_radar_layer`, and `render_relief` in `coldfront-core`. The ground is basemap or plain fill plus the ZIP pin. Radar pixels are denoised, sampled into the same n0q heightfield rules as the web, and extruded on that board. Shift-drag or right-drag orbits; left-drag still pans the map. Recenter clears pan and returns to the locked camera. An empty echo field keeps the ground and shows "No echoes in this view." The frame caption adds " · Relief" while 3D is on.
 
 `compose_radar_map` still paints a pale background (`213, 227, 236`), blits basemap and radar tiles, crops around the pin, and resizes to 400 by 260. That path stays for unit and contract tests. The interactive tab does not use it.
 

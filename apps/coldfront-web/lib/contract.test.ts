@@ -24,6 +24,7 @@ import {
   tileWindow,
   webRadarFrames,
 } from "./domain";
+import { bandHeight, fitOrthoHalfExtents } from "../src/radarRelief";
 
 const fixtures = resolve(import.meta.dirname, "../../../fixtures");
 
@@ -96,6 +97,23 @@ const contract = fixture("contract.json") as {
   applet_first_offset: number;
   codes: Array<{ code: number; label: string; icon: string }>;
   zips: { valid: string[]; invalid: string[] };
+  relief: {
+    bands: Array<{ r: number; g: number; b: number; height: number }>;
+    fit_cover: {
+      half_w: number;
+      half_h: number;
+      aspect: number;
+      out_half_w: number;
+      out_half_h: number;
+    };
+    fit_contain: {
+      half_w: number;
+      half_h: number;
+      aspect: number;
+      out_half_w: number;
+      out_half_h: number;
+    };
+  };
 };
 
 describe("shared fixtures", () => {
@@ -240,5 +258,27 @@ describe("shared fixtures", () => {
     expect(applet).toHaveLength(contract.applet_frames);
     expect(applet[0].offsetMinutes).toBe(contract.applet_first_offset);
     expect(applet.at(-1)?.label).toBe("Latest scan");
+  });
+
+  it("matches relief band heights and ortho fit", () => {
+    for (const band of contract.relief.bands) {
+      expect(bandHeight(band.r, band.g, band.b)).toBeCloseTo(band.height);
+    }
+    const cover = fitOrthoHalfExtents(
+      contract.relief.fit_cover.half_w,
+      contract.relief.fit_cover.half_h,
+      contract.relief.fit_cover.aspect,
+      "cover",
+    );
+    expect(cover.halfW).toBeCloseTo(contract.relief.fit_cover.out_half_w);
+    expect(cover.halfH).toBeCloseTo(contract.relief.fit_cover.out_half_h);
+    const contain = fitOrthoHalfExtents(
+      contract.relief.fit_contain.half_w,
+      contract.relief.fit_contain.half_h,
+      contract.relief.fit_contain.aspect,
+      "contain",
+    );
+    expect(contain.halfW).toBeCloseTo(contract.relief.fit_contain.out_half_w);
+    expect(contain.halfH).toBeCloseTo(contract.relief.fit_contain.out_half_h);
   });
 });

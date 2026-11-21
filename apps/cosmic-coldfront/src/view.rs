@@ -413,7 +413,7 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
         .on_press(Message::MapPress)
         .on_release(Message::MapRelease)
         .on_move(Message::MapMove)
-        .on_exit(Message::MapRelease)
+        .on_exit(Message::MapLeave)
         .on_scroll(Message::MapScroll)
         .interaction(interaction);
 
@@ -427,10 +427,38 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
     } else {
         fl!("tooltip-radar-expand")
     };
+    let relief = app.radar_mode == crate::app::RadarMode::Relief;
+    let mode_label = if relief {
+        fl!("radar-mode-relief")
+    } else {
+        fl!("radar-mode-flat")
+    };
+    let mode_tip = if relief {
+        fl!("tooltip-radar-flat")
+    } else {
+        fl!("tooltip-radar-relief")
+    };
+
+    let mode_button = widget::tooltip::tooltip(
+        widget::button::text(mode_label)
+            .on_press(Message::ToggleRadarMode)
+            .width(Length::Fixed(MAP_CONTROL_SIZE))
+            .height(Length::Fixed(MAP_CONTROL_SIZE))
+            .class(if relief {
+                cosmic::theme::Button::Suggested
+            } else {
+                map_control_button_class()
+            }),
+        widget::text::body(mode_tip),
+        widget::tooltip::Position::Left,
+    )
+    .gap(4);
 
     let zoom_controls = widget::Column::new()
         .spacing(0)
         .width(Length::Fixed(MAP_CONTROL_SIZE))
+        .push(mode_button)
+        .push(widget::divider::horizontal::default())
         .push(map_button(
             "list-add-symbolic",
             Message::ZoomIn,
@@ -517,10 +545,16 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
         .push(timeline)
         .push(widget::text::caption(format!(
             "{} · {}",
-            app.current_frame_label(),
+            app.current_frame_caption(),
             app.basemap_caption()
         )));
 
+    if app.radar_mode == crate::app::RadarMode::Relief
+        && app.relief_empty
+        && app.map_handle.is_some()
+    {
+        col = col.push(widget::text::caption(fl!("radar-no-echoes")));
+    }
     if app.radar_tiles == 0 && app.map_handle.is_some() {
         col = col.push(widget::text::caption(fl!("radar-missing")));
     }

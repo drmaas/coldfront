@@ -286,14 +286,63 @@ pub fn compose_viewport(
     basemap: &[Option<Vec<u8>>],
     radar: &[Option<Vec<u8>>],
 ) -> Result<Raster, Error> {
+    let mut output =
+        compose_viewport_layers(viewport, basemap, radar, Rgba([213, 227, 236, 255]), true)?;
+    draw_pin(&mut output, viewport.pin_x, viewport.pin_y);
+    Ok(Raster {
+        width: output.width(),
+        height: output.height(),
+        pixels: output.into_raw(),
+    })
+}
+
+/// Basemap (or pale fill) plus the ZIP pin. No radar underlay for Relief.
+pub fn compose_viewport_ground(
+    viewport: &MapViewport,
+    basemap: &[Option<Vec<u8>>],
+) -> Result<Raster, Error> {
+    let empty: Vec<Option<Vec<u8>>> = vec![None; basemap.len().max(1)];
+    let mut output =
+        compose_viewport_layers(viewport, basemap, &empty, Rgba([213, 227, 236, 255]), true)?;
+    draw_pin(&mut output, viewport.pin_x, viewport.pin_y);
+    Ok(Raster {
+        width: output.width(),
+        height: output.height(),
+        pixels: output.into_raw(),
+    })
+}
+
+/// Radar tiles only on a transparent clear. Same crop and size as the ground.
+pub fn compose_viewport_radar_layer(
+    viewport: &MapViewport,
+    radar: &[Option<Vec<u8>>],
+) -> Result<Raster, Error> {
+    let empty: Vec<Option<Vec<u8>>> = vec![None; radar.len().max(1)];
+    let output = compose_viewport_layers(viewport, &empty, radar, Rgba([0, 0, 0, 0]), false)?;
+    Ok(Raster {
+        width: output.width(),
+        height: output.height(),
+        pixels: output.into_raw(),
+    })
+}
+
+fn compose_viewport_layers(
+    viewport: &MapViewport,
+    basemap: &[Option<Vec<u8>>],
+    radar: &[Option<Vec<u8>>],
+    clear: Rgba<u8>,
+    blit_basemap: bool,
+) -> Result<RgbaImage, Error> {
     let grid = viewport.as_tile_window();
     let width = grid.span_x.saturating_mul(TILE_SIZE);
     let height = grid.span_y.saturating_mul(TILE_SIZE);
     if width == 0 || height == 0 || viewport.view_width == 0 || viewport.view_height == 0 {
         return Err(Error::Parse("map viewport is empty".into()));
     }
-    let mut image = RgbaImage::from_pixel(width, height, Rgba([213, 227, 236, 255]));
-    blit_tiles(&mut image, &grid, basemap);
+    let mut image = RgbaImage::from_pixel(width, height, clear);
+    if blit_basemap {
+        blit_tiles(&mut image, &grid, basemap);
+    }
     blit_tiles(&mut image, &grid, radar);
 
     let crop_w = viewport.view_width.min(width);
@@ -303,22 +352,16 @@ pub fn compose_viewport(
     let left = viewport.crop_x.min(max_left);
     let top = viewport.crop_y.min(max_top);
     let cropped = imageops::crop(&mut image, left, top, crop_w, crop_h).to_image();
-    let mut output = if crop_w == viewport.view_width && crop_h == viewport.view_height {
-        cropped
+    if crop_w == viewport.view_width && crop_h == viewport.view_height {
+        Ok(cropped)
     } else {
-        imageops::resize(
+        Ok(imageops::resize(
             &cropped,
             viewport.view_width,
             viewport.view_height,
             imageops::FilterType::Triangle,
-        )
-    };
-    draw_pin(&mut output, viewport.pin_x, viewport.pin_y);
-    Ok(Raster {
-        width: output.width(),
-        height: output.height(),
-        pixels: output.into_raw(),
-    })
+        ))
+    }
 }
 
 /// Stack basemap tiles, radar tiles, crop around the pin, and draw the pin.

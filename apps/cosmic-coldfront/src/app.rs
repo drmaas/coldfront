@@ -15,8 +15,10 @@ use cosmic::widget;
 use cosmic::widget::segmented_button;
 
 use coldfront_core::{
-    APPLET_ZOOM_MAX, APPLET_ZOOM_MIN, Alert, Forecast, HttpClient, Place, applet_radar_frames,
-    describe, display_icon, display_temperature, is_us_zip, symbolic_icon,
+    APPLET_ZOOM_MAX, APPLET_ZOOM_MIN, Alert, EchoField, Forecast, HttpClient, Place, Raster,
+    ReliefCamera, applet_radar_frames, build_echo_field, clamp_relief_pitch, default_relief_camera,
+    denoise_radar, describe, display_icon, display_temperature, echo_grid, is_us_zip,
+    render_relief, sample_echoes, symbolic_icon,
 };
 
 use crate::config::{self, Config};
@@ -48,6 +50,13 @@ pub enum PopupTab {
     Forecast,
     Alerts,
     Settings,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RadarMode {
+    #[default]
+    Flat,
+    Relief,
 }
 
 pub struct AppModel {
@@ -83,18 +92,32 @@ pub struct AppModel {
     frames_ready: Vec<u32>,
     drag: Option<DragState>,
     pointer: Option<Point>,
+    map_hovered: bool,
     ctrl_held: bool,
+    shift_held: bool,
     radar_opened: bool,
     pub(crate) radar_expanded: bool,
     expanded_size: Option<Size>,
+    pub(crate) radar_mode: RadarMode,
+    relief_camera: ReliefCamera,
+    relief_ground: Option<Raster>,
+    relief_field: Option<EchoField>,
+    pub(crate) relief_empty: bool,
     startup_fetch_done: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
-struct DragState {
-    start: Point,
-    pan_x: f64,
-    pan_y: f64,
+enum DragState {
+    Pan {
+        start: Point,
+        pan_x: f64,
+        pan_y: f64,
+    },
+    Orbit {
+        start: Point,
+        yaw: f32,
+        pitch: f32,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -127,8 +150,11 @@ pub enum Message {
     Recenter,
     ToggleRadarExpand,
     RadarExpandWith(Option<Size>),
+    ToggleRadarMode,
     MapPress,
+    MapRightPress,
     MapRelease,
+    MapLeave,
     MapMove(Point),
     MapScroll(ScrollDelta),
     MapSettle(u64),
@@ -223,10 +249,17 @@ impl cosmic::Application for AppModel {
             frames_ready: Vec::new(),
             drag: None,
             pointer: None,
+            map_hovered: false,
             ctrl_held: false,
+            shift_held: false,
             radar_opened: false,
             radar_expanded: false,
             expanded_size: None,
+            radar_mode: RadarMode::Flat,
+            relief_camera: default_relief_camera(MAP_VIEW_WIDTH, MAP_VIEW_HEIGHT),
+            relief_ground: None,
+            relief_field: None,
+            relief_empty: false,
             startup_fetch_done: false,
         };
         (app, Task::none())
@@ -256,7 +289,11 @@ impl cosmic::Application for AppModel {
                 Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                     Some(Message::Modifiers(modifiers))
                 }
-                Event::Mouse(cosmic::iced::mouse::Event::ButtonReleased(MouseButton::Left)) => {
+                Event::Mouse(cosmic::iced::mouse::Event::ButtonPressed(MouseButton::Right)) => {
+                    Some(Message::MapRightPress)
+                }
+                Event::Mouse(cosmic::iced::mouse::Event::ButtonReleased(MouseButton::Left))
+                | Event::Mouse(cosmic::iced::mouse::Event::ButtonReleased(MouseButton::Right)) => {
                     Some(Message::MapRelease)
                 }
                 _ => None,
@@ -372,8 +409,21 @@ impl cosmic::Application for AppModel {
             Message::Recenter => {
                 self.pan_x = 0.0;
                 self.pan_y = 0.0;
+                let (view_width, view_height) = self.map_size();
+                self.relief_camera = default_relief_camera(view_width, view_height);
                 self.recompose_current();
                 return self.schedule_settle();
+            }
+            Message::ToggleRadarMode => {
+                self.radar_mode = match self.radar_mode {
+                    RadarMode::Flat => RadarMode::Relief,
+                    RadarMode::Relief => RadarMode::Flat,
+                };
+                if self.radar_mode == RadarMode::Relief {
+                    let (view_width, view_height) = self.map_size();
+                    self.relief_camera = default_relief_camera(view_width, view_height);
+                }
+                self.recompose_current();
             }
             Message::ToggleRadarExpand => {
                 if self.radar_expanded {
@@ -388,24 +438,55 @@ impl cosmic::Application for AppModel {
             Message::RadarExpandWith(size) => return self.expand_radar(size),
             Message::MapPress => {
                 if let Some(point) = self.pointer {
-                    self.drag = Some(DragState {
-                        start: point,
-                        pan_x: self.pan_x,
-                        pan_y: self.pan_y,
-                    });
+                    self.drag = Some(self.begin_drag(point, self.shift_held));
+                }
+            }
+            Message::MapRightPress => {
+                if self.active_tab != PopupTab::Radar
+                    || self.radar_mode != RadarMode::Relief
+                    || !self.map_hovered
+                {
+                    return Task::none();
+                }
+                if let Some(point) = self.pointer {
+                    self.drag = Some(self.begin_drag(point, true));
                 }
             }
             Message::MapRelease => {
-                if self.drag.take().is_some() {
+                let was_pan = matches!(self.drag, Some(DragState::Pan { .. }));
+                self.drag = None;
+                if was_pan {
+                    return self.schedule_settle();
+                }
+            }
+            Message::MapLeave => {
+                self.map_hovered = false;
+                let was_pan = matches!(self.drag, Some(DragState::Pan { .. }));
+                self.drag = None;
+                if was_pan {
                     return self.schedule_settle();
                 }
             }
             Message::MapMove(point) => {
                 self.pointer = Some(point);
-                if let Some(drag) = self.drag {
-                    self.pan_x = drag.pan_x + f64::from(point.x - drag.start.x);
-                    self.pan_y = drag.pan_y + f64::from(point.y - drag.start.y);
-                    self.recompose_current();
+                self.map_hovered = true;
+                match self.drag {
+                    Some(DragState::Pan {
+                        start,
+                        pan_x,
+                        pan_y,
+                    }) => {
+                        self.pan_x = pan_x + f64::from(point.x - start.x);
+                        self.pan_y = pan_y + f64::from(point.y - start.y);
+                        self.recompose_current();
+                    }
+                    Some(DragState::Orbit { start, yaw, pitch }) => {
+                        self.relief_camera.yaw = yaw + (point.x - start.x) * 0.005;
+                        self.relief_camera.pitch =
+                            clamp_relief_pitch(pitch + (point.y - start.y) * 0.004);
+                        self.paint_relief_from_cache();
+                    }
+                    None => {}
                 }
             }
             Message::MapScroll(delta) => return self.handle_scroll(delta),
@@ -414,7 +495,10 @@ impl cosmic::Application for AppModel {
                     return self.refresh_visible_map();
                 }
             }
-            Message::Modifiers(modifiers) => self.ctrl_held = modifiers.control(),
+            Message::Modifiers(modifiers) => {
+                self.ctrl_held = modifiers.control();
+                self.shift_held = modifiers.shift();
+            }
             Message::WeatherReady(loaded) => {
                 if loaded.generation != self.generation {
                     return Task::none();
@@ -699,6 +783,10 @@ impl AppModel {
         self.shown_offset = 0;
         self.radar_opened = false;
         self.map_loading = false;
+        self.relief_ground = None;
+        self.relief_field = None;
+        self.relief_empty = false;
+        self.relief_camera = default_relief_camera(MAP_VIEW_WIDTH, MAP_VIEW_HEIGHT);
     }
 
     fn reload_map(&mut self, clear_cache: bool) -> Task<cosmic::Action<Message>> {
@@ -711,6 +799,9 @@ impl AppModel {
             self.tile_cache.clear();
             self.frames_ready.clear();
             self.map_handle = None;
+            self.relief_ground = None;
+            self.relief_field = None;
+            self.relief_empty = false;
         }
         // Keep the last composite on screen while edge tiles refill after pan.
         self.map_loading = self.map_handle.is_none();
@@ -863,14 +954,34 @@ impl AppModel {
             return;
         }
         if self.shown_offset == frame.offset_minutes {
-            self.radar_tiles = frame.radar_tiles;
-            self.map_handle = Some(cosmic::iced::widget::image::Handle::from_rgba(
-                frame.width,
-                frame.height,
-                frame.pixels,
-            ));
+            if self.radar_mode == RadarMode::Relief {
+                self.recompose_current();
+            } else {
+                self.radar_tiles = frame.radar_tiles;
+                self.map_handle = Some(cosmic::iced::widget::image::Handle::from_rgba(
+                    frame.width,
+                    frame.height,
+                    frame.pixels,
+                ));
+            }
         } else {
             self.recompose_current();
+        }
+    }
+
+    fn begin_drag(&self, point: Point, orbit: bool) -> DragState {
+        if orbit && self.radar_mode == RadarMode::Relief {
+            DragState::Orbit {
+                start: point,
+                yaw: self.relief_camera.yaw,
+                pitch: self.relief_camera.pitch,
+            }
+        } else {
+            DragState::Pan {
+                start: point,
+                pan_x: self.pan_x,
+                pan_y: self.pan_y,
+            }
         }
     }
 
@@ -889,6 +1000,32 @@ impl AppModel {
             view_height,
         );
         let kind = basemap_kind(&self.config);
+        if self.radar_mode == RadarMode::Relief {
+            let Ok((ground, mut radar, radar_tiles)) = mapload::compose_relief_layers(
+                &self.tile_cache,
+                &kind,
+                &viewport,
+                self.shown_offset,
+            ) else {
+                return;
+            };
+            denoise_radar(&mut radar.pixels, radar.width, radar.height);
+            let (cols, rows) = echo_grid(radar.width, radar.height);
+            let echoes = sample_echoes(&radar.pixels, radar.width, radar.height, cols, rows);
+            self.relief_empty = echoes.is_empty();
+            let field = build_echo_field(&echoes, cols, rows);
+            self.radar_tiles = radar_tiles;
+            self.relief_ground = Some(ground.clone());
+            self.relief_field = Some(field.clone());
+            let painted = render_relief(&ground, &field, &self.relief_camera);
+            self.map_handle = Some(cosmic::iced::widget::image::Handle::from_rgba(
+                painted.width,
+                painted.height,
+                painted.pixels,
+            ));
+            return;
+        }
+        self.relief_empty = false;
         let Ok(frame) =
             mapload::compose_cached(&self.tile_cache, &kind, &viewport, self.shown_offset)
         else {
@@ -899,6 +1036,19 @@ impl AppModel {
             frame.width,
             frame.height,
             frame.pixels,
+        ));
+    }
+
+    fn paint_relief_from_cache(&mut self) {
+        let (Some(ground), Some(field)) = (&self.relief_ground, &self.relief_field) else {
+            self.recompose_current();
+            return;
+        };
+        let painted = render_relief(ground, field, &self.relief_camera);
+        self.map_handle = Some(cosmic::iced::widget::image::Handle::from_rgba(
+            painted.width,
+            painted.height,
+            painted.pixels,
         ));
     }
 
@@ -1113,6 +1263,15 @@ impl AppModel {
 
     pub(crate) fn dragging(&self) -> bool {
         self.drag.is_some()
+    }
+
+    pub(crate) fn current_frame_caption(&self) -> String {
+        let mut label = self.current_frame_label();
+        if self.radar_mode == RadarMode::Relief {
+            label.push_str(" · ");
+            label.push_str(&fl!("radar-relief"));
+        }
+        label
     }
 }
 

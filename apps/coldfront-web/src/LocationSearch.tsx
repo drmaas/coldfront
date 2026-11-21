@@ -23,6 +23,7 @@ interface LocationSearchProps {
   initialValue?: string;
   ariaLabel?: string;
   submitLabel: string;
+  error?: string;
   onNavigate: (path: string) => void;
   onError: (message: string) => void;
 }
@@ -34,6 +35,7 @@ export function LocationSearch({
   initialValue = "",
   ariaLabel = "Location",
   submitLabel,
+  error = "",
   onNavigate,
   onError,
 }: LocationSearchProps) {
@@ -213,8 +215,13 @@ export function LocationSearch({
           {submitLabel}
         </button>
       </form>
-      {searching ? <p className="form-hint">Searching cities…</p> : null}
-      {searchError && !isZipLookup(query) ? <p className="form-error">{searchError}</p> : null}
+      <div className="location-status" aria-live="polite">
+        {searching ? <p className="form-hint">Searching cities…</p> : null}
+        {!searching && searchError && !isZipLookup(query) ? (
+          <p className="form-error">{searchError}</p>
+        ) : null}
+        {!searching && !searchError && error ? <p className="form-error">{error}</p> : null}
+      </div>
     </div>
   );
 }

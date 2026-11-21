@@ -70,10 +70,10 @@ function Landing({ theme, onTheme }: { theme: ThemePreference; onTheme: (theme: 
         inputClassName="hero-zip"
         placeholder="ZIP or city"
         submitLabel="Get forecast"
+        error={error}
         onNavigate={go}
         onError={setError}
       />
-      {error ? <p className="form-error landing-error">{error}</p> : null}
       <p className="subtitle">
         Current conditions, the next 24 hours, and a 10-day forecast from Open-Meteo, with live NEXRAD radar and active
         NWS alerts.

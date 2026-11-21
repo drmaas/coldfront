@@ -9,6 +9,14 @@ export interface EchoSample {
   b: number;
 }
 
+/** Settled relief board published sync (avoids one-frame jump on present). */
+export interface ReliefScene {
+  ground: ImageData;
+  echoes: EchoSample[];
+  cols: number;
+  rows: number;
+}
+
 /**
  * Classic NWS / IEM n0q order: cool cyan → green → yellow → orange → red → purple.
  * Height rises with that order so green stays short and red/purple stand tall.

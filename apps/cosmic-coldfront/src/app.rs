@@ -65,6 +65,7 @@ pub struct AppModel {
     pub(crate) weather_loading: bool,
     pub(crate) refresh_failed: bool,
     pub(crate) map_error: Option<String>,
+    pub(crate) selected_forecast_day: Option<usize>,
     pub(crate) active_tab: PopupTab,
     pub(crate) tab_model: segmented_button::SingleSelectModel,
     pub(crate) unit_model: segmented_button::SingleSelectModel,
@@ -163,6 +164,7 @@ pub enum Message {
         generation: u64,
         message: String,
     },
+    SelectForecastDay(usize),
 }
 
 impl cosmic::Application for AppModel {
@@ -206,6 +208,7 @@ impl cosmic::Application for AppModel {
             weather_loading: false,
             refresh_failed: false,
             map_error: None,
+            selected_forecast_day: Some(0),
             active_tab,
             tile_cache: TileCache::default(),
             map_handle: None,
@@ -426,6 +429,7 @@ impl cosmic::Application for AppModel {
                 self.weather_loading = false;
                 self.refresh_failed = false;
                 self.map_error = None;
+                self.selected_forecast_day = Some(0);
                 if self.active_tab == PopupTab::Radar || self.radar_opened {
                     let clear_cache = place_changed || self.map_handle.is_none();
                     return self.reload_map(clear_cache);
@@ -499,6 +503,15 @@ impl cosmic::Application for AppModel {
                     if self.map_handle.is_none() {
                         self.map_error = Some(message);
                     }
+                }
+            }
+            Message::SelectForecastDay(index) => {
+                if self
+                    .forecast
+                    .as_ref()
+                    .is_some_and(|forecast| index < forecast.daily.len())
+                {
+                    self.selected_forecast_day = Some(index);
                 }
             }
         }

@@ -2,6 +2,17 @@ interface IconProps {
   name: string;
 }
 
+export function PrecipDrop() {
+  return (
+    <svg className="precip-drop" viewBox="0 0 12 16" aria-hidden="true">
+      <path
+        d="M6 1.5c2.8 3.4 5 5.8 5 9a5 5 0 1 1-10 0c0-3.2 2.2-5.6 5-9z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 export function WeatherIcon({ name }: IconProps) {
   const rainy = name.includes("rain") || name === "drizzle" || name.includes("freezing");
   const snowy = name.includes("snow");

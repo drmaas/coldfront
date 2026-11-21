@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 use coldfront_core::{
     applet_radar_frames_at, chart_points, day_label, describe, display_icon, display_temperature,
-    display_wind_mph, format_as_of, hour_label, iem_tile_url, is_us_zip, lat_lon_to_tile,
-    next_hours, parse_alerts, parse_open_meteo, parse_zippopotam, range_placement,
+    display_wind_mph, format_as_of, format_clock_time, hour_label, iem_tile_url, is_us_zip,
+    lat_lon_to_tile, next_hours, parse_alerts, parse_open_meteo, parse_zippopotam, range_placement,
     round_half_away_from_zero, tile_window, web_radar_frames_at,
 };
 use serde_json::Value;
@@ -119,6 +119,10 @@ fn place_forecast_and_labels_match_the_contract() {
     let hours = next_hours(&forecast, 24);
     assert_eq!(hours.len(), 24);
     assert_eq!(hours[0].time, contract["next_hour_time"].as_str().unwrap());
+    assert_eq!(
+        hours[0].precip_probability,
+        Some(contract["next_hour0_pop"].as_i64().unwrap() as i32)
+    );
     assert!(hours[0].is_day);
     assert!(!hours[1].is_day);
     let labels: Vec<String> = hours
@@ -165,6 +169,22 @@ fn place_forecast_and_labels_match_the_contract() {
     assert_eq!(
         forecast.daily[0].weather_code,
         daily0["code"].as_i64().unwrap() as i32
+    );
+    close(
+        forecast.daily[0].precip_sum_mm.unwrap(),
+        daily0["precip_sum_mm"].as_f64().unwrap(),
+    );
+    close(
+        forecast.daily[0].wind_max_kmh.unwrap(),
+        daily0["wind_max_kmh"].as_f64().unwrap(),
+    );
+    assert_eq!(
+        format_clock_time(forecast.daily[0].sunrise.as_deref().unwrap()),
+        Some(daily0["sunrise"].as_str().unwrap().to_string())
+    );
+    assert_eq!(
+        format_clock_time(forecast.daily[0].sunset.as_deref().unwrap()),
+        Some(daily0["sunset"].as_str().unwrap().to_string())
     );
     assert_eq!(
         forecast.daily[4].precip_probability,

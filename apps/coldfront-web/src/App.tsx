@@ -7,6 +7,8 @@ import {
   displayTemperature,
   displayWindMph,
   formatAsOf,
+  formatClockTime,
+  formatPrecipAmountMm,
   hourLabel,
   isUsZip,
   nextHours,
@@ -16,10 +18,11 @@ import {
   rangePlacement,
   roundHalfAwayFromZero,
   type Alert,
+  type Day,
   type Forecast,
   type Place,
 } from "../lib/domain";
-import { ColdFront, WeatherIcon, Wordmark } from "./icons";
+import { ColdFront, PrecipDrop, WeatherIcon, Wordmark } from "./icons";
 import { RadarMap } from "./RadarMap";
 import {
   applyResolvedTheme,
@@ -195,7 +198,9 @@ interface ForecastData {
 
 function ForecastBody({ data, units }: { data: ForecastData; units: Units }) {
   const fahrenheit = units === "F";
+  const [selectedDay, setSelectedDay] = useState(0);
   const { forecast, place } = data;
+  useEffect(() => setSelectedDay(0), [forecast.current.time]);
   const hours = useMemo(() => nextHours(forecast, 24), [forecast]);
   const today = forecast.current.time.slice(0, 10);
   const temps = hours.map((hour) => displayTemperature(hour.temperatureC, fahrenheit));
@@ -222,13 +227,11 @@ function ForecastBody({ data, units }: { data: ForecastData; units: Units }) {
         </p>
         <div className="now">
           <WeatherIcon name={currentIcon} />
-          <div>
-            <p className="temp">
-              {displayTemperature(current.temperatureC, fahrenheit)}
-              <span>°</span>
-            </p>
-            <p className="condition">{condition.label}</p>
-          </div>
+          <p className="temp">
+            {displayTemperature(current.temperatureC, fahrenheit)}
+            <span>°</span>
+          </p>
+          <p className="condition">{condition.label}</p>
         </div>
         <ul className="facts">
           <li>Feels like {displayTemperature(current.apparentC, fahrenheit)}°</li>
@@ -259,10 +262,19 @@ function ForecastBody({ data, units }: { data: ForecastData; units: Units }) {
             <div className="hour-row">
               {hours.map((hour, index) => {
                 const info = describe(hour.weatherCode);
+                const pop = hour.precipProbability;
                 return (
                   <div className="hour" key={hour.time}>
                     <WeatherIcon name={displayIcon(info.icon, hour.isDay)} />
                     <span className="hour-temp">{temps[index]}°</span>
+                    {pop !== null ? (
+                      <span className={`hour-pop${pop <= 5 ? " hour-pop-low" : ""}`}>
+                        <PrecipDrop />
+                        {pop}%
+                      </span>
+                    ) : (
+                      <span className="hour-pop hour-pop-empty" aria-hidden="true" />
+                    )}
                   </div>
                 );
               })}
@@ -282,29 +294,89 @@ function ForecastBody({ data, units }: { data: ForecastData; units: Units }) {
         </div>
         <ColdFront className="divider" />
         <h2>10-day forecast</h2>
-        <ol className="days">
-          {forecast.daily.map((day) => {
+        <ol className="days" role="listbox" aria-label="10-day forecast">
+          {forecast.daily.map((day, index) => {
             const info = describe(day.weatherCode);
             const low = displayTemperature(day.tempMinC, fahrenheit);
             const high = displayTemperature(day.tempMaxC, fahrenheit);
             const bar = rangePlacement(low, high, scaleMin, scaleMax);
+            const selected = selectedDay === index;
             return (
               <li key={day.date}>
-                <span className="day-name">{dayLabel(day.date, today)}</span>
-                <WeatherIcon name={info.icon} />
-                <span className="pop">{day.precipProbability}%</span>
-                <span className="day-temp">{low}°</span>
-                <span className="range">
-                  <span style={{ left: `${bar.left}%`, width: `${bar.width}%` }} />
-                </span>
-                <span className="day-temp high">{high}°</span>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  className={`day-row${selected ? " selected" : ""}`}
+                  onClick={() => setSelectedDay(index)}
+                >
+                  <span className="day-name">{dayLabel(day.date, today)}</span>
+                  <WeatherIcon name={info.icon} />
+                  <span className="day-desc">{info.label}</span>
+                  <span className="pop">
+                    <PrecipDrop />
+                    {day.precipProbability}%
+                  </span>
+                  <span className="day-temp">{low}°</span>
+                  <span className="range">
+                    <span style={{ left: `${bar.left}%`, width: `${bar.width}%` }} />
+                  </span>
+                  <span className="day-temp high">{high}°</span>
+                </button>
               </li>
             );
           })}
         </ol>
+        {forecast.daily[selectedDay] ? (
+          <DayDetails
+            day={forecast.daily[selectedDay]}
+            dayTitle={dayLabel(forecast.daily[selectedDay].date, today)}
+            fahrenheit={fahrenheit}
+          />
+        ) : null}
       </section>
       <RadarMap latitude={place.latitude} longitude={place.longitude} basemap={data.basemap} />
     </div>
+  );
+}
+
+function DayDetails({ day, dayTitle, fahrenheit }: { day: Day; dayTitle: string; fahrenheit: boolean }) {
+  const info = describe(day.weatherCode);
+  const rows: Array<{ label: string; value: string }> = [
+    { label: "Conditions", value: info.label },
+    { label: "Precip chance", value: `${day.precipProbability}%` },
+  ];
+  if (day.precipSumMm !== null && day.precipSumMm > 0) {
+    rows.push({ label: "Precip amount", value: formatPrecipAmountMm(day.precipSumMm, fahrenheit) });
+  }
+  if (day.windMaxKmh !== null) {
+    rows.push({
+      label: "Max wind",
+      value: fahrenheit
+        ? `${displayWindMph(day.windMaxKmh)} mph`
+        : `${roundHalfAwayFromZero(day.windMaxKmh)} km/h`,
+    });
+  }
+  if (day.sunrise) {
+    const formatted = formatClockTime(day.sunrise);
+    if (formatted) rows.push({ label: "Sunrise", value: formatted });
+  }
+  if (day.sunset) {
+    const formatted = formatClockTime(day.sunset);
+    if (formatted) rows.push({ label: "Sunset", value: formatted });
+  }
+  return (
+    <section className="day-details" aria-live="polite">
+      <h3>{dayTitle}</h3>
+      <dl className="day-detail-grid">
+        {rows.map((row) => (
+          <div key={row.label}>
+            <dt>{row.label}</dt>
+            <dd>{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
   );
 }
 

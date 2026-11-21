@@ -13,8 +13,9 @@ use cosmic::widget;
 use cosmic::widget::svg;
 
 use coldfront_core::{
-    chart_points, day_label, describe, display_icon, display_temperature, display_wind_mph,
-    format_as_of, hour_label, is_us_zip, next_hours, range_placement,
+    Day, chart_points, day_label, describe, display_icon, display_temperature, display_wind_mph,
+    format_as_of, format_clock_time, format_precip_amount_mm, hour_label, is_us_zip, next_hours,
+    range_placement,
 };
 
 use crate::app::{AppModel, Message, PopupTab};
@@ -543,13 +544,22 @@ fn hourly_tab(app: &AppModel) -> Element<'_, Message> {
     for (index, hour) in hours.iter().enumerate() {
         let info = describe(hour.weather_code);
         let temp = temps[index] as i32;
+        let pop = hour
+            .precip_probability
+            .map(|value| format!("{value}%"))
+            .unwrap_or_else(|| " ".into());
         icons = icons.push(
             widget::Column::new()
                 .spacing(2)
                 .align_x(Alignment::Center)
                 .width(Length::Fixed(HOUR_COLUMN))
                 .push(weather_icon(display_icon(info.icon, hour.is_day), 28.0))
-                .push(widget::text::body(format!("{temp}°"))),
+                .push(widget::text::body(format!("{temp}°")))
+                .push(
+                    widget::text::caption(pop)
+                        .width(Length::Fixed(HOUR_COLUMN))
+                        .align_x(Alignment::Center),
+                ),
         );
         labels = labels.push(
             widget::container(widget::text::caption(hour_label(&hour.time, index == 0)))
@@ -605,17 +615,22 @@ fn forecast_tab(app: &AppModel) -> Element<'_, Message> {
     let scale_min = lows.iter().copied().fold(f64::INFINITY, f64::min);
     let scale_max = highs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
 
-    let mut col = widget::Column::new().spacing(spacing.space_xs);
+    let selected = app.selected_forecast_day.unwrap_or(0);
+    let mut col = widget::Column::new().spacing(spacing.space_xxs);
     for (index, day) in forecast.daily.iter().enumerate() {
         let info = describe(day.weather_code);
         let low = lows[index] as i32;
         let high = highs[index] as i32;
         let bar = range_placement(lows[index], highs[index], scale_min, scale_max);
+        let is_selected = selected == index;
         let row = widget::Row::new()
             .spacing(spacing.space_xs)
             .align_y(Alignment::Center)
             .push(widget::text::body(day_label(&day.date, &today)).width(Length::Fixed(52.0)))
             .push(weather_icon(info.icon, 28.0))
+            .push(widget::text::caption(info.label).width(Length::Fill).class(
+                cosmic::style::Text::Color(Color::from_rgb(0.45, 0.48, 0.52)),
+            ))
             .push(
                 widget::text::caption(format!("{}%", day.precip_probability))
                     .width(Length::Fixed(42.0)),
@@ -626,13 +641,87 @@ fn forecast_tab(app: &AppModel) -> Element<'_, Message> {
                     left: bar.left as f32,
                     width: bar.width as f32,
                 })
-                .width(Length::Fill)
+                .width(Length::FillPortion(2))
                 .height(Length::Fixed(12.0)),
             )
             .push(widget::text::body(format!("{high}°")).width(Length::Fixed(36.0)));
-        col = col.push(row);
+        let mut row_wrap = widget::container(row)
+            .padding([spacing.space_xxs, spacing.space_xs])
+            .width(Length::Fill);
+        if is_selected {
+            row_wrap = row_wrap.style(|theme| {
+                let cosmic = theme.cosmic();
+                let mut accent = Color::from(cosmic.accent_color());
+                accent.a = 0.16;
+                cosmic::widget::container::Style {
+                    background: Some(accent.into()),
+                    border: cosmic::iced::Border {
+                        width: 1.0,
+                        radius: cosmic.corner_radii.radius_s.into(),
+                        color: cosmic.accent_color().into(),
+                    },
+                    ..popup_fill(theme)
+                }
+            });
+        }
+        let button = widget::button::custom(row_wrap)
+            .width(Length::Fill)
+            .class(cosmic::theme::Button::Text)
+            .on_press(Message::SelectForecastDay(index));
+        col = col.push(button);
+    }
+    col = col.push(widget::divider::horizontal::default());
+    if let Some(day) = forecast.daily.get(selected) {
+        col = col.push(day_details_panel(
+            day,
+            &day_label(&day.date, &today),
+            app.config.fahrenheit,
+        ));
     }
     col.into()
+}
+
+fn day_details_panel(day: &Day, title: &str, fahrenheit: bool) -> Element<'static, Message> {
+    let spacing = cosmic::theme::spacing();
+    let info = describe(day.weather_code);
+    let mut col = widget::Column::new()
+        .spacing(spacing.space_xxs)
+        .push(widget::text::heading(title.to_string()));
+    col = col.push(detail_pair(fl!("conditions"), info.label.to_string()));
+    col = col.push(detail_pair(
+        fl!("precip-chance"),
+        format!("{}%", day.precip_probability),
+    ));
+    if let Some(mm) = day.precip_sum_mm.filter(|value| *value > 0.0) {
+        col = col.push(detail_pair(
+            fl!("precip-amount"),
+            format_precip_amount_mm(mm, fahrenheit),
+        ));
+    }
+    if let Some(wind) = day.wind_max_kmh {
+        let wind_text = if fahrenheit {
+            format!("{} mph", display_wind_mph(wind))
+        } else {
+            format!("{} km/h", display_temperature(wind, false))
+        };
+        col = col.push(detail_pair(fl!("max-wind"), wind_text));
+    }
+    if let Some(sunrise) = day.sunrise.as_deref().and_then(format_clock_time) {
+        col = col.push(detail_pair(fl!("sunrise"), sunrise));
+    }
+    if let Some(sunset) = day.sunset.as_deref().and_then(format_clock_time) {
+        col = col.push(detail_pair(fl!("sunset"), sunset));
+    }
+    col.into()
+}
+
+fn detail_pair(label: String, value: String) -> Element<'static, Message> {
+    let spacing = cosmic::theme::spacing();
+    widget::Row::new()
+        .spacing(spacing.space_s)
+        .push(widget::text::caption(label).width(Length::Fixed(110.0)))
+        .push(widget::text::body(value).width(Length::Fill))
+        .into()
 }
 
 fn settings_tab(app: &AppModel) -> Element<'_, Message> {

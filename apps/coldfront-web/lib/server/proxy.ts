@@ -5,6 +5,9 @@
 
 export const USER_AGENT = "Coldfront/0.1 (https://github.com/drmaas/coldfront)";
 
+/** Open-Meteo geocode upstream timeout passed to `AbortSignal.timeout`. */
+export const GEOCODE_UPSTREAM_TIMEOUT_MS = 11_000;
+
 const OPEN_METEO =
   "https://api.open-meteo.com/v1/forecast?current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,is_day&hourly=temperature_2m,weather_code,precipitation_probability,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,wind_speed_10m_max,relative_humidity_2m_mean,sunrise,sunset&temperature_unit=celsius&wind_speed_unit=kmh&timezone=auto&forecast_days=10";
 
@@ -89,11 +92,18 @@ export async function proxyApi(request: Request, maptilerKey: string | undefined
       headers: { "content-type": plan.contentType, "cache-control": "no-store" },
     });
   }
+  const isGeocode = plan.upstream.url.includes("geocoding-api.open-meteo.com");
   let upstreamResponse: Response;
   try {
-    upstreamResponse = await fetch(plan.upstream.url, { headers: plan.upstream.headers });
-  } catch {
-    return new Response("upstream failed", { status: 502 });
+    upstreamResponse = await fetch(plan.upstream.url, {
+      headers: plan.upstream.headers,
+      signal: isGeocode ? AbortSignal.timeout(GEOCODE_UPSTREAM_TIMEOUT_MS) : undefined,
+    });
+  } catch (error: unknown) {
+    if (isGeocode && error instanceof Error && error.name === "TimeoutError") {
+      return new Response("upstream timed out", { status: 504, headers: { "cache-control": "no-store" } });
+    }
+    return new Response("upstream failed", { status: 502, headers: { "cache-control": "no-store" } });
   }
   const headers = new Headers();
   headers.set(

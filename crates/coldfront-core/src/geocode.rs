@@ -5,6 +5,9 @@ use crate::place::Place;
 use crate::zipcode::is_us_zip;
 use serde_json::Value;
 
+/// Maximum city search query length. Matches the web Worker route.
+pub const GEOCODE_QUERY_MAX_LEN: usize = 64;
+
 /// One US city match from Open-Meteo geocoding.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GeocodeHit {
@@ -49,6 +52,11 @@ pub fn place_from_geocode_hit(hit: &GeocodeHit) -> Place {
         latitude: hit.latitude,
         longitude: hit.longitude,
     }
+}
+
+pub fn geocode_query_allowed(query: &str) -> bool {
+    let trimmed = query.trim();
+    !(trimmed.is_empty() || trimmed.chars().count() > GEOCODE_QUERY_MAX_LEN)
 }
 
 pub fn geocode_url(query: &str, count: u8) -> String {
@@ -204,6 +212,13 @@ mod tests {
             .join("fixtures")
             .join(name);
         fs::read(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
+    }
+
+    #[test]
+    fn long_queries_are_rejected() {
+        let long = "a".repeat(GEOCODE_QUERY_MAX_LEN + 1);
+        assert!(!geocode_query_allowed(&long));
+        assert!(geocode_query_allowed(&"x".repeat(GEOCODE_QUERY_MAX_LEN)));
     }
 
     #[test]

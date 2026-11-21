@@ -28,8 +28,8 @@ pub use forecast::{
     hour_label, next_hours, parse_open_meteo,
 };
 pub use geocode::{
-    GeocodeHit, format_geocode_label, geocode_url, parse_geocode_search, place_from_geocode_hit,
-    state_abbreviation,
+    GEOCODE_QUERY_MAX_LEN, GeocodeHit, format_geocode_label, geocode_query_allowed, geocode_url,
+    parse_geocode_search, place_from_geocode_hit, state_abbreviation,
 };
 pub use location::{
     RouteTarget, coordinates_match, has_resolved_coordinates, is_zip_lookup, location_path,

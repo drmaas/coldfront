@@ -60,7 +60,7 @@ impl HttpClient {
 
     pub async fn search_cities(&self, query: &str) -> Result<Vec<GeocodeHit>, Error> {
         let trimmed = query.trim();
-        if trimmed.is_empty() {
+        if trimmed.is_empty() || !crate::geocode::geocode_query_allowed(trimmed) {
             return Ok(Vec::new());
         }
         let bytes = self.get_bytes(&geocode_url(trimmed, 8)).await?;

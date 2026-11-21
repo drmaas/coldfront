@@ -17,10 +17,12 @@ use cosmic::widget::segmented_button;
 use coldfront_core::{
     Alert, EchoField, Forecast, GeocodeHit, GestureCamera, HttpClient, Place, Raster, ReliefCamera,
     SnapshotTransform, applet_radar_frames, build_echo_field, clamp_relief_pitch,
-    default_relief_camera, describe, display_icon, display_temperature, echo_grid, is_us_zip,
-    is_zip_lookup, place_from_geocode_hit, render_relief, sample_echoes, snapshot_transform,
-    symbolic_icon, zoom_toward,
+    default_relief_camera, describe, display_icon, display_temperature, echo_grid,
+    geocode_query_allowed, is_us_zip, is_zip_lookup, place_from_geocode_hit, render_relief,
+    sample_echoes, snapshot_transform, symbolic_icon, zoom_toward,
 };
+
+const GEOCODE_SEARCH_DEBOUNCE: Duration = Duration::from_millis(300);
 
 use crate::config::{self, Config};
 use crate::fl;
@@ -65,6 +67,7 @@ pub struct AppModel {
     pub(crate) config: Config,
     pub(crate) zip_draft: String,
     pub(crate) geocode_hits: Vec<GeocodeHit>,
+    geocode_hits_query: String,
     pub(crate) geocode_loading: bool,
     pub(crate) geocode_error: Option<String>,
     geocode_generation: u64,
@@ -148,6 +151,9 @@ pub enum Message {
     RefreshWeather,
     ZipDraft(String),
     SaveZip,
+    GeocodeSearch {
+        generation: u64,
+    },
     GeocodeReady {
         generation: u64,
         hits: Vec<GeocodeHit>,
@@ -247,6 +253,7 @@ impl cosmic::Application for AppModel {
             popup: None,
             zip_draft: location_draft(&config),
             geocode_hits: Vec::new(),
+            geocode_hits_query: String::new(),
             geocode_loading: false,
             geocode_error: None,
             geocode_generation: 0,
@@ -403,7 +410,25 @@ impl cosmic::Application for AppModel {
             Message::ZipDraft(value) => {
                 self.zip_draft = value;
                 self.geocode_error = None;
-                return self.schedule_geocode_search();
+                self.geocode_hits.clear();
+                self.geocode_hits_query.clear();
+                let trimmed = self.zip_draft.trim();
+                if trimmed.is_empty() || is_zip_lookup(trimmed) {
+                    self.geocode_loading = false;
+                    return Task::none();
+                }
+                self.geocode_generation = self.geocode_generation.wrapping_add(1);
+                let generation = self.geocode_generation;
+                return cosmic::task::future(async move {
+                    tokio::time::sleep(GEOCODE_SEARCH_DEBOUNCE).await;
+                    Message::GeocodeSearch { generation }
+                });
+            }
+            Message::GeocodeSearch { generation } => {
+                if generation != self.geocode_generation {
+                    return Task::none();
+                }
+                return self.run_geocode_search(generation);
             }
             Message::SaveZip => return self.save_location(),
             Message::GeocodeReady { generation, hits } => {
@@ -412,6 +437,7 @@ impl cosmic::Application for AppModel {
                 }
                 self.geocode_loading = false;
                 self.geocode_hits = hits;
+                self.geocode_hits_query = self.zip_draft.trim().to_string();
                 if self.geocode_hits.is_empty() && !is_zip_lookup(&self.zip_draft) {
                     self.geocode_error = Some("no matching US cities found".into());
                 }
@@ -425,9 +451,14 @@ impl cosmic::Application for AppModel {
                 }
                 self.geocode_loading = false;
                 self.geocode_hits.clear();
+                self.geocode_hits_query.clear();
                 self.geocode_error = Some(message);
             }
             Message::PickGeocode(index) => {
+                let trimmed = self.zip_draft.trim();
+                if self.geocode_hits_query != trimmed {
+                    return Task::none();
+                }
                 let Some(hit) = self.geocode_hits.get(index).cloned() else {
                     return Task::none();
                 };
@@ -439,6 +470,7 @@ impl cosmic::Application for AppModel {
                     self.zip_draft = format!("{}, {}", place.city, place.state_abbreviation);
                 }
                 self.geocode_hits.clear();
+                self.geocode_hits_query.clear();
                 self.geocode_error = None;
                 config::save(&self.config);
                 return self.start_weather_load(true);
@@ -889,25 +921,23 @@ impl AppModel {
         })
     }
 
-    fn schedule_geocode_search(&mut self) -> Task<cosmic::Action<Message>> {
+    fn run_geocode_search(&mut self, generation: u64) -> Task<cosmic::Action<Message>> {
         let trimmed = self.zip_draft.trim().to_string();
-        if is_zip_lookup(&trimmed) {
+        if is_zip_lookup(&trimmed) || trimmed.is_empty() || !geocode_query_allowed(&trimmed) {
             self.geocode_hits.clear();
+            self.geocode_hits_query.clear();
             self.geocode_loading = false;
-            self.geocode_error = None;
+            if !trimmed.is_empty() && !is_zip_lookup(&trimmed) && !geocode_query_allowed(&trimmed) {
+                self.geocode_error = Some("no matching US cities found".into());
+            } else {
+                self.geocode_error = None;
+            }
             return Task::none();
         }
-        self.geocode_generation = self.geocode_generation.wrapping_add(1);
-        let generation = self.geocode_generation;
         self.geocode_loading = true;
         self.geocode_hits.clear();
+        self.geocode_hits_query.clear();
         cosmic::task::future(async move {
-            if trimmed.is_empty() {
-                return Message::GeocodeReady {
-                    generation,
-                    hits: Vec::new(),
-                };
-            }
             let client = match HttpClient::new() {
                 Ok(client) => client,
                 Err(error) => {
@@ -941,15 +971,17 @@ impl AppModel {
             self.geocode_error = None;
             return self.start_weather_load(true);
         }
-        if self.geocode_hits.len() == 1 {
+        let hits_current = self.geocode_hits_query == trimmed;
+        if hits_current && self.geocode_hits.len() == 1 {
             let place = place_from_geocode_hit(&self.geocode_hits[0]);
             self.config.apply_place(&place);
             config::save(&self.config);
             self.geocode_hits.clear();
+            self.geocode_hits_query.clear();
             self.geocode_error = None;
             return self.start_weather_load(true);
         }
-        if self.geocode_hits.len() > 1 {
+        if hits_current && self.geocode_hits.len() > 1 {
             self.geocode_error = Some("choose a city from the list".into());
             return Task::none();
         }

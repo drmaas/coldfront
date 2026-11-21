@@ -16,7 +16,7 @@ use cosmic::widget::svg;
 use coldfront_core::{
     Day, SnapshotTransform, chart_points, day_label, describe, display_icon, display_temperature,
     display_wind_mph, format_as_of, format_clock_time, format_geocode_label,
-    format_precip_amount_mm, hour_label, is_us_zip, next_hours, range_placement,
+    format_precip_amount_mm, hour_label, next_hours, range_placement,
 };
 
 use crate::app::{AppModel, Message, PopupTab};

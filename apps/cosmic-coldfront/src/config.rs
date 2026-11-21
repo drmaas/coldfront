@@ -62,6 +62,7 @@ impl Config {
         is_us_zip(&self.zip) || has_resolved_coordinates(self.latitude, self.longitude)
     }
 
+    #[cfg(test)]
     pub fn saved_place(&self) -> Option<Place> {
         if !has_resolved_coordinates(self.latitude, self.longitude) {
             return None;
@@ -102,19 +103,23 @@ mod tests {
 
     #[test]
     fn zip_only_config_still_loads() {
-        let mut config = Config::default();
-        config.zip = "95501".into();
+        let config = Config {
+            zip: "95501".into(),
+            ..Config::default()
+        };
         assert!(config.has_weather_location());
         assert!(config.saved_place().is_none());
     }
 
     #[test]
     fn saved_coordinates_fallback_without_zip() {
-        let mut config = Config::default();
-        config.city = "Eureka".into();
-        config.state_abbreviation = "CA".into();
-        config.latitude = 40.8021;
-        config.longitude = -124.1637;
+        let config = Config {
+            city: "Eureka".into(),
+            state_abbreviation: "CA".into(),
+            latitude: 40.8021,
+            longitude: -124.1637,
+            ..Config::default()
+        };
         assert!(config.has_weather_location());
         let place = config.saved_place().expect("place");
         assert_eq!(place.city, "Eureka");

@@ -1351,7 +1351,7 @@ mod tests {
         let ground = Raster {
             width: 8,
             height: 6,
-            pixels: vec![10, 20, 30, 255].repeat(8 * 6),
+            pixels: [10, 20, 30, 255].repeat(8 * 6),
         };
         let field = build_echo_field(&[], 4, 3);
         let camera = default_relief_camera(8, 6);

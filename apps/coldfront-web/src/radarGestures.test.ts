@@ -5,6 +5,7 @@ import {
   pointerCenter,
   pointerSpan,
   radarGestureConfig,
+  touchPoints,
   type RadarViewMode,
 } from "./radarGestures";
 
@@ -46,5 +47,15 @@ describe("pointerSpan and pointerCenter", () => {
     const b = { x: 3, y: 4 };
     expect(pointerSpan(a, b)).toBe(5);
     expect(pointerCenter(a, b)).toEqual({ x: 1.5, y: 2 });
+  });
+});
+
+describe("touchPoints", () => {
+  it("reads client coordinates from a TouchList-like list", () => {
+    const touches = [{ clientX: 10, clientY: 20 }, { clientX: 30, clientY: 40 }] as unknown as TouchList;
+    expect(touchPoints(touches)).toEqual([
+      { x: 10, y: 20 },
+      { x: 30, y: 40 },
+    ]);
   });
 });

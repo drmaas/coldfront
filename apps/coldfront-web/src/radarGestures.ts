@@ -32,6 +32,17 @@ export function pointerCenter(
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
 
+/** Snapshot live touches — preferred over PointerEvents for multi-finger pinch. */
+export function touchPoints(touches: TouchList | ArrayLike<Touch>): { x: number; y: number }[] {
+  const points: { x: number; y: number }[] = [];
+  for (let i = 0; i < touches.length; i += 1) {
+    const touch = touches[i];
+    if (!touch) continue;
+    points.push({ x: touch.clientX, y: touch.clientY });
+  }
+  return points;
+}
+
 /** Continuous zoom from an initial pinch span; `log2` keeps pinch speed even. */
 export function pinchTargetZoom(
   startZoom: number,

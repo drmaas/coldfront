@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { iemTileUrl, webRadarFrames } from "../lib/domain";
 import { RadarRelief } from "./RadarRelief";
-import { pinchTargetZoom, pointerCenter, pointerSpan, RADAR_STAGE_GESTURE } from "./radarGestures";
+import {
+  pinchTargetZoom,
+  pointerCenter,
+  pointerSpan,
+  RADAR_STAGE_GESTURE,
+  touchPoints,
+} from "./radarGestures";
 import { denoiseRadar, echoGrid, sampleEchoes, webgl2Available, type EchoSample } from "./radarRelief";
 
 interface RadarMapProps {
@@ -157,29 +163,35 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
     if (!stage) return undefined;
 
     type Point = { x: number; y: number };
-    const pointers = new Map<number, Point>();
-    let pinch:
-      | {
-          startSpan: number;
-          startZoom: number;
-          startPan: { x: number; y: number };
-          originX: number;
-          originY: number;
-        }
-      | null = null;
+    type Pinch = {
+      startSpan: number;
+      startZoom: number;
+      startPan: { x: number; y: number };
+      originX: number;
+      originY: number;
+    };
+    let pinch: Pinch | null = null;
+    let gestureRaf = 0;
+    // Touch Events own phone/touchscreen when they fire; Pointer fallback if they do not.
+    let touchOwns = false;
+    const touchPointers = new Map<number, Point>();
+    let mouseDrag: { pointerId: number; x: number; y: number; panX: number; panY: number } | null =
+      null;
 
-    const pointerValues = (): Point[] => [...pointers.values()];
-
-    const blockedTarget = (event: PointerEvent) =>
-      (event.target as Element | null)?.closest?.(".zoom-controls, button, input, a");
+    const blockedTarget = (target: EventTarget | null) =>
+      (target as Element | null)?.closest?.(".zoom-controls, button, input, a");
 
     const flushPanZoom = () => {
+      gestureRaf = 0;
       setZoom(zoomRef.current);
       setPan(panRef.current);
     };
 
-    const beginPinch = () => {
-      const pts = pointerValues();
+    const scheduleFlush = () => {
+      if (!gestureRaf) gestureRaf = window.requestAnimationFrame(flushPanZoom);
+    };
+
+    const beginPinch = (pts: Point[]) => {
       if (pts.length < 2) return;
       const rect = stage.getBoundingClientRect();
       const center = pointerCenter(pts[0], pts[1]);
@@ -193,101 +205,196 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
       };
     };
 
+    const applyPinch = (pts: Point[]) => {
+      if (pts.length < 2) return;
+      if (!pinch) beginPinch(pts);
+      const active = pinch;
+      if (!active || active.startSpan <= 0) return;
+      const span = pointerSpan(pts[0], pts[1]);
+      const targetZoom = pinchTargetZoom(
+        active.startZoom,
+        active.startSpan,
+        span,
+        MIN_ZOOM,
+        MAX_ZOOM,
+      );
+      const next = zoomToward(
+        active.startZoom,
+        targetZoom,
+        active.originX,
+        active.originY,
+        stage.clientWidth,
+        stage.clientHeight,
+        active.startPan,
+      );
+      zoomRef.current = next.zoom;
+      panRef.current = next.pan;
+      scheduleFlush();
+    };
+
+    const beginOneFingerPan = (pt: Point) => {
+      pinch = null;
+      drag.current = { x: pt.x, y: pt.y, panX: panRef.current.x, panY: panRef.current.y };
+    };
+
+    const applyOneFingerPan = (pt: Point) => {
+      const start = drag.current;
+      if (!start) return;
+      panRef.current = {
+        x: start.panX + pt.x - start.x,
+        y: start.panY + pt.y - start.y,
+      };
+      scheduleFlush();
+    };
+
+    const syncTouchPointerGesture = () => {
+      const pts = [...touchPointers.values()];
+      if (pts.length >= 2) {
+        applyPinch(pts);
+        return;
+      }
+      if (pts.length === 1) {
+        if (!drag.current || pinch) beginOneFingerPan(pts[0]);
+        else applyOneFingerPan(pts[0]);
+        return;
+      }
+      pinch = null;
+      drag.current = null;
+    };
+
+    const onTouchStart = (event: TouchEvent) => {
+      if (blockedTarget(event.target)) return;
+      touchOwns = true;
+      touchPointers.clear();
+      const pts = touchPoints(event.touches);
+      if (pts.length >= 2) {
+        // Stop browser page-zoom before the gesture commits (Safari/Chrome).
+        event.preventDefault();
+        beginPinch(pts);
+        return;
+      }
+      if (pts.length === 1) beginOneFingerPan(pts[0]);
+    };
+
+    const onTouchMove = (event: TouchEvent) => {
+      if (!touchOwns) return;
+      if (blockedTarget(event.target) && !drag.current && !pinch) return;
+      const pts = touchPoints(event.touches);
+      if (pts.length >= 2) {
+        event.preventDefault();
+        applyPinch(pts);
+        return;
+      }
+      if (pts.length === 1 && drag.current) {
+        event.preventDefault();
+        applyOneFingerPan(pts[0]);
+      }
+    };
+
+    const onTouchEnd = (event: TouchEvent) => {
+      if (!touchOwns) return;
+      const pts = touchPoints(event.touches);
+      if (pts.length >= 2) {
+        beginPinch(pts);
+        return;
+      }
+      pinch = null;
+      if (pts.length === 1) beginOneFingerPan(pts[0]);
+      else {
+        drag.current = null;
+        touchOwns = false;
+      }
+    };
+
     const onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0 || event.shiftKey) return;
-      if (blockedTarget(event)) return;
-      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (blockedTarget(event.target)) return;
+
+      if (event.pointerType === "touch") {
+        if (touchOwns) return;
+        // No setPointerCapture — capture drops the second finger on Safari/Android.
+        touchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        if (touchPointers.size === 1) beginOneFingerPan({ x: event.clientX, y: event.clientY });
+        else if (touchPointers.size >= 2) beginPinch([...touchPointers.values()]);
+        return;
+      }
+
+      mouseDrag = {
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        panX: panRef.current.x,
+        panY: panRef.current.y,
+      };
+      drag.current = { x: event.clientX, y: event.clientY, panX: panRef.current.x, panY: panRef.current.y };
       try {
         stage.setPointerCapture(event.pointerId);
       } catch {
         // Some browsers reject capture on unsupported targets.
       }
-      if (pointers.size === 1) {
-        pinch = null;
-        drag.current = { x: event.clientX, y: event.clientY, panX: panRef.current.x, panY: panRef.current.y };
-      } else if (pointers.size === 2) {
-        beginPinch();
-      }
     };
 
     const onPointerMove = (event: PointerEvent) => {
-      if (!pointers.has(event.pointerId)) return;
-      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-
-      if (pointers.size >= 2) {
-        if (!pinch) beginPinch();
-        const active = pinch;
-        if (!active || active.startSpan <= 0) return;
+      if (event.pointerType === "touch") {
+        if (touchOwns || !touchPointers.has(event.pointerId)) return;
         event.preventDefault();
-        const pts = pointerValues();
-        if (pts.length < 2) return;
-        const span = pointerSpan(pts[0], pts[1]);
-        const targetZoom = pinchTargetZoom(
-          active.startZoom,
-          active.startSpan,
-          span,
-          MIN_ZOOM,
-          MAX_ZOOM,
-        );
-        const next = zoomToward(
-          active.startZoom,
-          targetZoom,
-          active.originX,
-          active.originY,
-          stage.clientWidth,
-          stage.clientHeight,
-          active.startPan,
-        );
-        zoomRef.current = next.zoom;
-        panRef.current = next.pan;
-        flushPanZoom();
+        touchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        syncTouchPointerGesture();
         return;
       }
-
-      const start = drag.current;
-      if (!start) return;
+      if (!mouseDrag || mouseDrag.pointerId !== event.pointerId) return;
       panRef.current = {
-        x: start.panX + event.clientX - start.x,
-        y: start.panY + event.clientY - start.y,
+        x: mouseDrag.panX + event.clientX - mouseDrag.x,
+        y: mouseDrag.panY + event.clientY - mouseDrag.y,
       };
-      flushPanZoom();
+      scheduleFlush();
     };
 
     const endPointer = (event: PointerEvent) => {
-      if (!pointers.has(event.pointerId)) return;
-      pointers.delete(event.pointerId);
+      if (event.pointerType === "touch") {
+        if (touchOwns || !touchPointers.has(event.pointerId)) return;
+        touchPointers.delete(event.pointerId);
+        const pts = [...touchPointers.values()];
+        if (pts.length >= 2) beginPinch(pts);
+        else if (pts.length === 1) beginOneFingerPan(pts[0]);
+        else {
+          pinch = null;
+          drag.current = null;
+        }
+        return;
+      }
+      if (!mouseDrag || mouseDrag.pointerId !== event.pointerId) return;
+      mouseDrag = null;
+      drag.current = null;
       try {
         if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId);
       } catch {
         // Ignore release failures.
       }
-      if (pointers.size < 2) {
-        pinch = null;
-      }
-      if (pointers.size === 0) {
-        drag.current = null;
-      } else if (pointers.size === 1) {
-        const remaining = pointerValues()[0];
-        drag.current = {
-          x: remaining.x,
-          y: remaining.y,
-          panX: panRef.current.x,
-          panY: panRef.current.y,
-        };
-      }
     };
 
+    stage.addEventListener("touchstart", onTouchStart, { passive: false });
+    stage.addEventListener("touchmove", onTouchMove, { passive: false });
+    stage.addEventListener("touchend", onTouchEnd);
+    stage.addEventListener("touchcancel", onTouchEnd);
     stage.addEventListener("pointerdown", onPointerDown);
     stage.addEventListener("pointermove", onPointerMove, { passive: false });
     stage.addEventListener("pointerup", endPointer);
     stage.addEventListener("pointercancel", endPointer);
     return () => {
+      stage.removeEventListener("touchstart", onTouchStart);
+      stage.removeEventListener("touchmove", onTouchMove);
+      stage.removeEventListener("touchend", onTouchEnd);
+      stage.removeEventListener("touchcancel", onTouchEnd);
       stage.removeEventListener("pointerdown", onPointerDown);
       stage.removeEventListener("pointermove", onPointerMove);
       stage.removeEventListener("pointerup", endPointer);
       stage.removeEventListener("pointercancel", endPointer);
-      pointers.clear();
+      if (gestureRaf) window.cancelAnimationFrame(gestureRaf);
       pinch = null;
+      mouseDrag = null;
+      touchOwns = false;
+      touchPointers.clear();
       drag.current = null;
     };
   }, []);

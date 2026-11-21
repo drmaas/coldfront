@@ -19,5 +19,5 @@ export function dayRowButtonA11y(
       "aria-controls": detailsId,
     };
   }
-  return { "aria-pressed": false };
+  return { "aria-pressed": false, "aria-expanded": false };
 }

@@ -147,6 +147,19 @@ To verify versions without releasing:
 scripts/check-version.sh vX.Y.Z
 ```
 
+### Install a released Arch package
+
+On Arch Linux, install the applet from a GitHub Release without building from source. The script downloads `cosmic-coldfront-*-x86_64.pkg.tar.zst` and runs `sudo pacman -U`:
+
+```bash
+scripts/install-applet.sh              # latest release
+scripts/install-applet.sh 0.2.1        # or v0.2.1
+# just install-applet
+# just install-applet 0.2.1
+```
+
+Useful flags: `--dry-run` (print the plan only), `--yes` (no prompt; `pacman --noconfirm`). Needs `pacman` and `curl`. Uses `gh` when present; otherwise needs `python3` to parse release JSON. Restart the applet in the COSMIC panel after install.
+
 > [!WARNING]
 > Do not push a `v*` tag to try the workflow. The workflow publishes a GitHub Release.
 

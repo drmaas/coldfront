@@ -27,3 +27,6 @@ check:
 
 release *args:
     scripts/release.sh {{ args }}
+
+install-applet *args:
+    scripts/install-applet.sh {{ args }}

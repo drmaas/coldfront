@@ -115,8 +115,32 @@ pub fn symbolic_icon(icon: &str) -> &'static str {
         "partly-cloudy-night" => "weather-few-clouds-night-symbolic",
         "overcast" => "weather-overcast-symbolic",
         "fog" => "weather-fog-symbolic",
+        "drizzle" | "rain" | "rain-showers" | "freezing-drizzle" | "freezing-rain" => {
+            "weather-showers-symbolic"
+        }
         "snow" | "snow-showers" => "weather-snow-symbolic",
         "thunder" => "weather-storm-symbolic",
         _ => "weather-showers-symbolic",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::symbolic_icon;
+
+    #[test]
+    fn symbolic_icon_maps_precip_types() {
+        for icon in [
+            "drizzle",
+            "rain",
+            "rain-showers",
+            "freezing-drizzle",
+            "freezing-rain",
+        ] {
+            assert_eq!(symbolic_icon(icon), "weather-showers-symbolic");
+        }
+        for icon in ["snow", "snow-showers"] {
+            assert_eq!(symbolic_icon(icon), "weather-snow-symbolic");
+        }
     }
 }

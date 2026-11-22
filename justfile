@@ -24,3 +24,6 @@ check:
     cargo build -p cosmic-coldfront --locked
     cd apps/coldfront-web && pnpm exec wrangler types --include-runtime false --check
     cd apps/coldfront-web && pnpm run lint && pnpm run typecheck && pnpm test && pnpm run build
+
+release *args:
+    scripts/release.sh {{ args }}

@@ -132,7 +132,16 @@ Three values must match. The script strips the leading `v` and compares the rest
 
 `crates/coldfront-core` and `apps/coldfront-web/package.json` are not part of that check.
 
-Check the versions before you push the tag:
+From a clean `main` that matches `origin/main`, run the release script. It bumps those two files and `Cargo.lock`, runs `just check`, commits, pushes `main`, pushes the `v*` tag, and watches the Arch release workflow:
+
+```bash
+scripts/release.sh minor          # or major, patch, or vX.Y.Z
+# just release minor
+```
+
+Useful flags: `--dry-run` (print the plan only), `--yes` (no prompt), `--skip-check` (skip `just check`).
+
+To verify versions without releasing:
 
 ```bash
 scripts/check-version.sh vX.Y.Z

@@ -50,6 +50,7 @@ Do not treat the web app and the applet as one program. They do not share a bina
 | Saved ZIP, units, key, OSM toggle | `apps/cosmic-coldfront/src/config.rs` |
 | Applet strings | `apps/cosmic-coldfront/i18n/en/cosmic_coldfront.ftl` |
 | Arch package | `arch/PKGBUILD` and `apps/cosmic-coldfront/Cargo.toml` version together |
+| Applet release (version bump + tag) | `scripts/release.sh` (or `just release`); do not invent a second path |
 | CI, deploy, or the Arch release workflow | `.github/workflows` |
 
 ## Commands

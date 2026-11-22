@@ -14,7 +14,9 @@ export function PrecipDrop() {
 }
 
 export function WeatherIcon({ name }: IconProps) {
-  const rainy = name.includes("rain") || name === "drizzle" || name.includes("freezing");
+  const sleety = name.includes("freezing");
+  const rainy =
+    !sleety && (name.includes("rain") || name === "drizzle");
   const snowy = name.includes("snow");
   const storm = name === "thunder";
   const night = name.endsWith("-night");
@@ -24,6 +26,7 @@ export function WeatherIcon({ name }: IconProps) {
     name === "partly-cloudy" ||
     name === "partly-cloudy-night" ||
     rainy ||
+    sleety ||
     snowy ||
     storm;
   const sun = name === "clear" || name === "mainly-clear" || name === "partly-cloudy";
@@ -60,6 +63,22 @@ export function WeatherIcon({ name }: IconProps) {
           strokeWidth="1.4"
           strokeLinecap="round"
         />
+      )}
+      {sleety && (
+        <>
+          <path
+            d="M13 24 l-1.4 3"
+            stroke="#5b8def"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+          />
+          <path
+            d="M20 24 v3 M18.8 25.2 h2.4"
+            stroke="#d7e4f5"
+            strokeWidth="1.2"
+            strokeLinecap="round"
+          />
+        </>
       )}
       {snowy && (
         <path

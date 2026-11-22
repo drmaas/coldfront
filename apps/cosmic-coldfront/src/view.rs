@@ -1016,7 +1016,8 @@ fn weather_icon(name: &str, size: f32) -> Element<'static, Message> {
 }
 
 fn weather_icon_svg(name: &str) -> String {
-    let rainy = name.contains("rain") || name == "drizzle" || name.contains("freezing");
+    let sleety = name.contains("freezing");
+    let rainy = !sleety && (name.contains("rain") || name == "drizzle");
     let snowy = name.contains("snow");
     let storm = name == "thunder";
     let night = name.ends_with("-night");
@@ -1025,6 +1026,7 @@ fn weather_icon_svg(name: &str) -> String {
         || name == "partly-cloudy"
         || name == "partly-cloudy-night"
         || rainy
+        || sleety
         || snowy
         || storm;
     let sun = name == "clear" || name == "mainly-clear" || name == "partly-cloudy";
@@ -1066,6 +1068,11 @@ fn weather_icon_svg(name: &str) -> String {
     if rainy {
         parts.push_str(
             r##"<path d="M12 24 l-1.4 3 M17 24 l-1.4 3 M22 24 l-1.4 3" stroke="#5b8def" stroke-width="1.4" stroke-linecap="round"/>"##,
+        );
+    }
+    if sleety {
+        parts.push_str(
+            r##"<path d="M13 24 l-1.4 3" stroke="#5b8def" stroke-width="1.4" stroke-linecap="round"/><path d="M20 24 v3 M18.8 25.2 h2.4" stroke="#d7e4f5" stroke-width="1.2" stroke-linecap="round"/>"##,
         );
     }
     if snowy {

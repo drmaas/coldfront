@@ -10,6 +10,7 @@ on:
       - Cargo.toml
       - Cargo.lock
       - arch/**
+      - scripts/check-version.sh
       - .github/workflows/release-arch.yml
   workflow_dispatch:
 
@@ -71,6 +72,7 @@ jobs:
           git archive --prefix="coldfront-$pkgver/" \
             -o arch/"coldfront-$pkgver.tar.gz" HEAD
           useradd -m builder
+          chown -R builder arch
           mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR"
           chown -R builder:builder "$GITHUB_WORKSPACE/.cargo-cache"
           su builder -c "export CARGO_HOME='$CARGO_HOME' CARGO_TARGET_DIR='$CARGO_TARGET_DIR' CARGO_INCREMENTAL=0; cd arch && makepkg --noconfirm --nocheck"
@@ -87,7 +89,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish the GitHub Release
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

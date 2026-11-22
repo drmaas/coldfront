@@ -3,9 +3,10 @@
 # Arch Linux package for the Coldfront COSMIC applet.
 #
 # .github/workflows/release-arch.yml builds this in an Arch container on v* tag
-# pushes (release) and on main when Rust or arch paths change (Cargo cache warm).
-# It is not run on pull requests. CI on main already runs workspace tests; the
-# workflow uses makepkg --nocheck there. Hand builds still run check(). To build
+# pushes (release upload) and on main or workflow_dispatch for Cargo cache warm.
+# Only tag pushes publish a GitHub Release. It is not run on pull requests. CI
+# on main already runs workspace tests; the workflow uses makepkg --nocheck there.
+# Hand builds still run check(). To build
 # by hand on Arch, from a checkout:
 #
 #   pkgver=$(sed -n 's/^pkgver=//p' arch/PKGBUILD)

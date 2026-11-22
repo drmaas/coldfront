@@ -19,7 +19,7 @@ Do not put product behavior here.
 - `secrets` runs gitleaks `v8.30.1` with `--redact`. Checkout uses `fetch-depth: 0`.
 - `deploy` needs `web`, `rust`, and `secrets`. It runs only when `github.event_name == 'push'` and the ref is `main`. It rebuilds the web app, then deploys with `cloudflare/wrangler-action@v4`. It needs repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Pull requests and `workflow_dispatch` never reach this job.
 
-`release-arch.yml` runs on a push of a `v*` tag, on `main` when listed Rust or arch paths change (Cargo cache warm), and on `workflow_dispatch`. Tag pushes publish a GitHub Release. Other runs build the package and refresh the Cargo cache but skip `check-version.sh` and release upload. It needs `permissions: contents: write`. The job uses the `archlinux:latest` container, `actions/cache` on workspace `.cargo-cache`, and `makepkg --nocheck` (CI already tests the workspace).
+`release-arch.yml` runs on a push of a `v*` tag, on `main` when listed Rust or arch paths change (Cargo cache warm), and on `workflow_dispatch`. Only `push` events with a tag ref publish a GitHub Release; `workflow_dispatch` never runs the release step. Other runs build the package and refresh the Cargo cache but skip `check-version.sh` and release upload. After `git archive`, `chown -R builder arch` before `makepkg` so the unprivileged user can write under `arch/`. It needs `permissions: contents: write`. The job uses the `archlinux:latest` container, `actions/cache` on workspace `.cargo-cache`, and `makepkg --nocheck` (CI already tests the workspace).
 
 ## Rules
 

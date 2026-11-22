@@ -442,14 +442,76 @@ export function dayLabel(date: string, today: string): string {
   return WEEKDAYS[utc.getUTCDay()];
 }
 
+export const WEB_RADAR_INTERVAL_MS = 750;
+export const APPLET_RADAR_INTERVAL_MS = 800;
+export const WEB_RADAR_STEP_MINUTES = 5;
+export const APPLET_RADAR_STEP_MINUTES = 10;
+
+export type RadarLookback = 1 | 2 | 3;
+export type RadarSpeed = 1 | 2 | 4;
+
+export function nextRadarLookback(lookback: RadarLookback): RadarLookback {
+  if (lookback === 1) return 2;
+  if (lookback === 2) return 3;
+  return 1;
+}
+
+export function nextRadarSpeed(speed: RadarSpeed): RadarSpeed {
+  if (speed === 1) return 2;
+  if (speed === 2) return 4;
+  return 1;
+}
+
 export function webRadarFrames(now: Date = new Date()): RadarFrame[] {
+  return webRadarFramesFor(1, now);
+}
+
+/** Web radar frames for a lookback. Step stays five minutes. */
+export function webRadarFramesFor(lookback: RadarLookback, now: Date = new Date()): RadarFrame[] {
+  if (lookback === 1) {
+    const frames: RadarFrame[] = [];
+    for (let step = 11; step >= 0; step -= 1) frames.push(radarFrame(step * WEB_RADAR_STEP_MINUTES, now));
+    return frames;
+  }
+  const oldest = lookback * 60;
+  const steps = oldest / WEB_RADAR_STEP_MINUTES;
   const frames: RadarFrame[] = [];
-  for (let step = 11; step >= 0; step -= 1) frames.push(radarFrame(step * 5, now));
+  for (let step = steps; step >= 0; step -= 1) {
+    frames.push(radarFrame(step * WEB_RADAR_STEP_MINUTES, now));
+  }
   return frames;
 }
 
 export function appletRadarFrames(now: Date = new Date()): RadarFrame[] {
-  return [50, 40, 30, 20, 10, 0].map((offset) => radarFrame(offset, now));
+  return appletRadarFramesFor(1, now);
+}
+
+/** Applet radar frames for a lookback. One hour keeps 50…0; longer uses ten-minute steps. */
+export function appletRadarFramesFor(lookback: RadarLookback, now: Date = new Date()): RadarFrame[] {
+  if (lookback === 1) {
+    return [50, 40, 30, 20, 10, 0].map((offset) => radarFrame(offset, now));
+  }
+  const oldest = lookback * 60;
+  const steps = oldest / APPLET_RADAR_STEP_MINUTES;
+  const frames: RadarFrame[] = [];
+  for (let step = steps; step >= 0; step -= 1) {
+    frames.push(radarFrame(step * APPLET_RADAR_STEP_MINUTES, now));
+  }
+  return frames;
+}
+
+/** Web playback interval for a speed multiplier (1× / 2× / 4×). */
+export function webRadarIntervalMs(speed: RadarSpeed): number {
+  return radarIntervalMs(WEB_RADAR_INTERVAL_MS, speed);
+}
+
+/** Applet playback interval for a speed multiplier (1× / 2× / 4×). */
+export function appletRadarIntervalMs(speed: RadarSpeed): number {
+  return radarIntervalMs(APPLET_RADAR_INTERVAL_MS, speed);
+}
+
+function radarIntervalMs(baseMs: number, speed: RadarSpeed): number {
+  return Math.max(1, roundHalfAwayFromZero(baseMs / speed));
 }
 
 /** IEM tile layer for one animation offset. See Rust `radar_layer`. */

@@ -3,6 +3,8 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   appletRadarFrames,
+  appletRadarFramesFor,
+  appletRadarIntervalMs,
   chartPoints,
   dayLabel,
   describe as describeCode,
@@ -25,6 +27,8 @@ import {
   roundHalfAwayFromZero,
   tileWindow,
   webRadarFrames,
+  webRadarFramesFor,
+  webRadarIntervalMs,
 } from "./domain";
 import { bandHeight, fitOrthoHalfExtents } from "../src/radarRelief";
 
@@ -97,6 +101,24 @@ const contract = fixture("contract.json") as {
   web_last: { offset_minutes: number; layer: string; label: string };
   applet_frames: number;
   applet_first_offset: number;
+  radar_lookback: {
+    web_2h_frames: number;
+    web_2h_first_offset: number;
+    web_3h_frames: number;
+    web_3h_first_offset: number;
+    applet_2h_frames: number;
+    applet_2h_first_offset: number;
+    applet_3h_frames: number;
+    applet_3h_first_offset: number;
+  };
+  radar_intervals_ms: {
+    web_1x: number;
+    web_2x: number;
+    web_4x: number;
+    applet_1x: number;
+    applet_2x: number;
+    applet_4x: number;
+  };
   codes: Array<{ code: number; label: string; icon: string }>;
   geocode: {
     eureka_ca_zip: string;
@@ -277,6 +299,26 @@ describe("shared fixtures", () => {
     expect(applet).toHaveLength(contract.applet_frames);
     expect(applet[0].offsetMinutes).toBe(contract.applet_first_offset);
     expect(applet.at(-1)?.label).toBe("Latest scan");
+    const lookback = contract.radar_lookback;
+    const web2h = webRadarFramesFor(2, now);
+    expect(web2h).toHaveLength(lookback.web_2h_frames);
+    expect(web2h[0].offsetMinutes).toBe(lookback.web_2h_first_offset);
+    const web3h = webRadarFramesFor(3, now);
+    expect(web3h).toHaveLength(lookback.web_3h_frames);
+    expect(web3h[0].offsetMinutes).toBe(lookback.web_3h_first_offset);
+    const applet2h = appletRadarFramesFor(2, now);
+    expect(applet2h).toHaveLength(lookback.applet_2h_frames);
+    expect(applet2h[0].offsetMinutes).toBe(lookback.applet_2h_first_offset);
+    const applet3h = appletRadarFramesFor(3, now);
+    expect(applet3h).toHaveLength(lookback.applet_3h_frames);
+    expect(applet3h[0].offsetMinutes).toBe(lookback.applet_3h_first_offset);
+    const intervals = contract.radar_intervals_ms;
+    expect(webRadarIntervalMs(1)).toBe(intervals.web_1x);
+    expect(webRadarIntervalMs(2)).toBe(intervals.web_2x);
+    expect(webRadarIntervalMs(4)).toBe(intervals.web_4x);
+    expect(appletRadarIntervalMs(1)).toBe(intervals.applet_1x);
+    expect(appletRadarIntervalMs(2)).toBe(intervals.applet_2x);
+    expect(appletRadarIntervalMs(4)).toBe(intervals.applet_4x);
   });
 
   it("matches relief band heights and ortho fit", () => {

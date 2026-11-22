@@ -37,13 +37,16 @@ pub use location::{
 };
 pub use place::{Place, parse_zippopotam};
 pub use radar::{
-    APPLET_ZOOM_MAX, APPLET_ZOOM_MIN, GestureCamera, IEM_TILE_ORIGIN, MAP_DISPLAY_HEIGHT,
-    MAP_DISPLAY_WIDTH, MapCamera, MapViewport, RadarFrame, Raster, SnapshotTransform, TILE_SIZE,
-    TileCamera, TilePoint, TileWindow, applet_radar_frames, applet_radar_frames_at,
-    compose_radar_map, compose_viewport, compose_viewport_ground, compose_viewport_radar_layer,
-    iem_tile_url, lat_lon_to_tile, map_viewport, maptiler_tile_url, osm_tile_url, pin_mercator,
-    radar_layer, scale_raster, snapshot_transform, tile_camera, tile_window, web_radar_frames,
-    web_radar_frames_at, world_to_screen, zoom_toward,
+    APPLET_RADAR_INTERVAL_MS, APPLET_RADAR_STEP_MINUTES, APPLET_ZOOM_MAX, APPLET_ZOOM_MIN,
+    GestureCamera, IEM_TILE_ORIGIN, MAP_DISPLAY_HEIGHT, MAP_DISPLAY_WIDTH, MapCamera, MapViewport,
+    RadarFrame, RadarLookback, RadarSpeed, Raster, SnapshotTransform, TILE_SIZE, TileCamera,
+    TilePoint, TileWindow, WEB_RADAR_INTERVAL_MS, WEB_RADAR_STEP_MINUTES, applet_radar_frames,
+    applet_radar_frames_at, applet_radar_frames_for, applet_radar_frames_lookback,
+    applet_radar_interval_ms, compose_radar_map, compose_viewport, compose_viewport_ground,
+    compose_viewport_radar_layer, iem_tile_url, lat_lon_to_tile, map_viewport, maptiler_tile_url,
+    osm_tile_url, pin_mercator, radar_frame_at, radar_layer, scale_raster, snapshot_transform,
+    tile_camera, tile_window, web_radar_frames, web_radar_frames_at, web_radar_frames_for,
+    web_radar_frames_lookback, web_radar_interval_ms, world_to_screen, zoom_toward,
 };
 pub use relief::{
     DEFAULT_COLS, DEFAULT_PITCH, DEFAULT_ROWS, DEFAULT_YAW, EchoField, EchoSample, OrthoFit,

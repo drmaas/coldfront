@@ -122,7 +122,7 @@ Skip the MapTiler secret when the site should serve radar without a street map. 
 
 ## Release the applet
 
-The Arch package builds only when a `v*` tag is pushed. `.github/workflows/release-arch.yml` runs `scripts/check-version.sh` for that tag, builds `arch/PKGBUILD` in an `archlinux` container, and uploads `cosmic-coldfront-*.pkg.tar.zst` to the GitHub Release.
+The Arch package release path runs when a `v*` tag is pushed. `.github/workflows/release-arch.yml` runs `scripts/check-version.sh` for that tag, builds `arch/PKGBUILD` in an `archlinux` container, and uploads `cosmic-coldfront-*.pkg.tar.zst` to the GitHub Release. Only a tag **push** publishes; `workflow_dispatch` never uploads to a release even if you select a tag ref. The same workflow also runs on pushes to `main` that touch the applet, workspace crates, or `arch/`, and on `workflow_dispatch`, to warm a shared Cargo cache; those runs skip version check and release upload but still produce an artifact.
 
 Three values must match. The script strips the leading `v` and compares the rest:
 

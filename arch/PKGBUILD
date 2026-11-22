@@ -2,9 +2,12 @@
 #
 # Arch Linux package for the Coldfront COSMIC applet.
 #
-# .github/workflows/release-arch.yml builds this in an Arch container when a
-# v* tag is pushed. It is not run from CI on pull requests. To build by hand
-# on Arch, from a checkout:
+# .github/workflows/release-arch.yml builds this in an Arch container on v* tag
+# pushes (release upload) and on main or workflow_dispatch for Cargo cache warm.
+# Only tag pushes publish a GitHub Release. It is not run on pull requests. CI
+# on main already runs workspace tests; the workflow uses makepkg --nocheck there.
+# Hand builds still run check(). To build
+# by hand on Arch, from a checkout:
 #
 #   pkgver=$(sed -n 's/^pkgver=//p' arch/PKGBUILD)
 #   git archive --prefix="coldfront-$pkgver/" -o arch/"coldfront-$pkgver.tar.gz" HEAD
@@ -60,21 +63,21 @@ prepare() {
 build() {
     cd "coldfront-$pkgver"
     export RUSTUP_TOOLCHAIN=stable
-    export CARGO_TARGET_DIR=target
+    export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}"
     cargo build --frozen --release -p cosmic-coldfront
 }
 
 check() {
     cd "coldfront-$pkgver"
     export RUSTUP_TOOLCHAIN=stable
-    export CARGO_TARGET_DIR=target
+    export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}"
     cargo test --frozen --release -p coldfront-core
 }
 
 package() {
     cd "coldfront-$pkgver"
 
-    install -Dm0755 target/release/cosmic-coldfront \
+    install -Dm0755 "${CARGO_TARGET_DIR:-target}/release/cosmic-coldfront" \
         "$pkgdir/usr/bin/cosmic-coldfront"
     install -Dm0644 apps/cosmic-coldfront/resources/io.github.drmaas.CosmicColdfront.desktop \
         "$pkgdir/usr/share/applications/io.github.drmaas.CosmicColdfront.desktop"

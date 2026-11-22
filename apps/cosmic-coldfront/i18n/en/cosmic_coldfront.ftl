@@ -37,6 +37,7 @@ tab-current = Current
 tab-radar = Radar
 tab-hourly = Hourly
 tab-forecast = 10-day
+tooltip-refresh = Refresh weather
 tooltip-alerts = Alerts
 tooltip-settings = Settings
 tooltip-zoom-in = Zoom in

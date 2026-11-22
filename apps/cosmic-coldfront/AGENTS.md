@@ -14,7 +14,7 @@ Do not call the web Worker from the applet.
 
 ## Rules
 
-- Popup tabs are Current, Radar, Hourly, and 10-day. Settings and Alerts open from the header gear and alert button (not tab-bar segments). Radar is a tab, not stacked above the facts.
+- Popup tabs are Current, Radar, Hourly, and 10-day. Refresh, Settings, and Alerts open from the header refresh, gear, and alert buttons (not tab-bar segments). Radar is a tab, not stacked above the facts.
 - Keep the popup at 480×440 for every tab. Radar may expand toward the monitor and restore to that size; leaving Radar or closing the popup clears expand.
 - Popup fill stays opaque. `init` clears applet auto-blur so the frosted palette stays off. The panel button window stays transparent.
 - Hourly draws a 24-hour temperature strip with `chart_points`. The 10-day tab draws high/low range bars with `range_placement`. Forecast icons in the popup can be inline SVGs; the panel icon stays `symbolic_icon`.

@@ -54,7 +54,7 @@ flowchart LR
 | `apps/cosmic-coldfront` | COSMIC panel applet. Links `coldfront-core`, talks to upstream hosts itself. No map widget, so it composites raster tiles into one image. |
 | `crates/coldfront-core` | Rust domain crate. Web does not call it. `lib/domain.ts` is the parallel copy. |
 
-Web page: current conditions, next 24 hours, 10-day list, radar, up to three alerts, or "No active alerts" when the list is empty. Applet popup: tabbed Current, Radar, Hourly, and 10-day views, with Settings and Alerts from the header. Up to three alerts show in the Alerts view.
+Web page: current conditions, next 24 hours, 10-day list, radar, up to three alerts, or "No active alerts" when the list is empty. Applet popup: tabbed Current, Radar, Hourly, and 10-day views, with Refresh, Settings, and Alerts from the header. Up to three alerts show in the Alerts view.
 
 ## Shared rules
 
@@ -127,7 +127,7 @@ Worker details, cache headers, and validation: [Worker API](reference.md#worker-
 
 App id `io.github.drmaas.CosmicColdfront`. `init` reads cosmic-config and does not fetch. After startup, a valid saved ZIP loads place, forecast, and alerts so the panel icon and temperature match. Closing the popup keeps memory; reopening does not refetch weather when `forecast` is set. Radar tiles load when the Radar tab opens.
 
-Popup tabs are Current, Radar, Hourly, and 10-day. Settings and Alerts open from the header (not tab-bar segments). Every tab uses a fixed 480×440 popup. The popup fill is opaque. The panel button window stays transparent. Radar Full screen asks the Wayland popup to grow toward the monitor (`set_size` on the popup, not a toplevel resize) and Restore returns it to 480×440 beside the panel. Invalid ZIP bumps `generation`, clears place and forecast, and returns with no network. Alert HTTP failure becomes an empty list. A failed same-ZIP refresh keeps the last forecast. Stale `generation` / `map_generation` results are ignored.
+Popup tabs are Current, Radar, Hourly, and 10-day. Refresh, Settings, and Alerts open from the header (not tab-bar segments). Every tab uses a fixed 480×440 popup. The popup fill is opaque. The panel button window stays transparent. Radar Full screen asks the Wayland popup to grow toward the monitor (`set_size` on the popup, not a toplevel resize) and Restore returns it to 480×440 beside the panel. Invalid ZIP bumps `generation`, clears place and forecast, and returns with no network. Alert HTTP failure becomes an empty list. A failed same-ZIP refresh keeps the last forecast. Stale `generation` / `map_generation` results are ignored.
 
 Config version 1: `zip`, saved city coordinates (`city`, `state_abbreviation`, `latitude`, `longitude`), `fahrenheit` (default true), `maptiler_api_key`, `allow_osm_basemap` (default false). ZIP-only configs still load. Unit changes save without reload. Location changes refetch weather. Key and OSM toggle reload the map after the Radar tab has been opened.
 

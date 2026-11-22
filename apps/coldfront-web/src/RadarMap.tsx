@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { webRadarFrames } from "../lib/domain";
+import {
+  nextRadarLookback,
+  nextRadarSpeed,
+  webRadarFramesFor,
+  webRadarIntervalMs,
+  type RadarLookback,
+  type RadarSpeed,
+} from "../lib/domain";
 import {
   MAX_ZOOM,
   MIN_ZOOM,
@@ -54,9 +61,11 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
   const cardRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const frames = useMemo(() => webRadarFrames(), []);
   const glOk = useMemo(() => webgl2Available(), []);
-  const [index, setIndex] = useState(frames.length - 1);
+  const [lookback, setLookback] = useState<RadarLookback>(1);
+  const [speed, setSpeed] = useState<RadarSpeed>(1);
+  const frames = useMemo(() => webRadarFramesFor(lookback), [lookback]);
+  const [index, setIndex] = useState(() => webRadarFramesFor(1).length - 1);
   const [playing, setPlaying] = useState(true);
   const [zoom, setZoom] = useState(6);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -73,6 +82,8 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
   const zoomRef = useRef(zoom);
   const panRef = useRef(pan);
   const modeRef = useRef(mode);
+  const shownOffsetRef = useRef(0);
+  const lookbackForIndexRef = useRef(lookback);
   const wheelRaf = useRef(0);
   const blitRaf = useRef(0);
   const settleTimer = useRef(0);
@@ -85,8 +96,15 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
   const groundBufferRef = useRef<HTMLCanvasElement | null>(null);
   const reliefSceneRef = useRef<ReliefScene | null>(null);
   const reliefRecenter = useRef<(() => void) | null>(null);
+  // Keep shown offset across lookback changes. Do not sample frames[oldIndex]
+  // after the list swaps — that would pick the wrong minute.
+  if (lookbackForIndexRef.current === lookback && frames[index]) {
+    shownOffsetRef.current = frames[index].offsetMinutes;
+  }
   const frame = frames[index] ?? frames[frames.length - 1];
   const nextFrame = frames[(index + 1) % frames.length] ?? frame;
+  const oldestLabel = frames[0]?.label ?? "55 min ago";
+  const intervalMs = webRadarIntervalMs(speed);
   const withBasemap = basemap === "maptiler";
   const relief = mode === "relief" && glOk;
   const settleArgsRef = useRef({
@@ -423,12 +441,19 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
   }, [glOk, mode]);
 
   useEffect(() => {
+    if (lookbackForIndexRef.current === lookback) return;
+    lookbackForIndexRef.current = lookback;
+    const nextIndex = frames.findIndex((item) => item.offsetMinutes === shownOffsetRef.current);
+    setIndex(nextIndex >= 0 ? nextIndex : frames.length - 1);
+  }, [lookback, frames]);
+
+  useEffect(() => {
     if (!playing) return undefined;
     const timer = window.setInterval(() => {
       setIndex((current) => (current + 1) % frames.length);
-    }, 750);
+    }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [playing, frames.length]);
+  }, [playing, frames.length, intervalMs]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -876,7 +901,15 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
         </div>
       </div>
       <div className="radar-controls">
-        <span>55 min ago</span>
+        <button
+          type="button"
+          className="radar-meta"
+          aria-label={`Lookback ${lookback}h. Click to change.`}
+          title={`Lookback ${lookback}h · ${oldestLabel}`}
+          onClick={() => setLookback((current) => nextRadarLookback(current))}
+        >
+          {lookback}h
+        </button>
         <input
           type="range"
           min={0}
@@ -891,6 +924,15 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
         <span>Now</span>
         <button type="button" className="pause" onClick={() => setPlaying((value) => !value)}>
           {playing ? "Pause" : "Play"}
+        </button>
+        <button
+          type="button"
+          className="radar-meta"
+          aria-label={`Playback speed ${speed}×. Click to change.`}
+          title="Playback speed"
+          onClick={() => setSpeed((current) => nextRadarSpeed(current))}
+        >
+          {speed}×
         </button>
       </div>
       <p className="radar-caption">

@@ -15,8 +15,9 @@ use cosmic::widget;
 use cosmic::widget::segmented_button;
 
 use coldfront_core::{
-    Alert, EchoField, Forecast, GeocodeHit, GestureCamera, HttpClient, Place, Raster, ReliefCamera,
-    SnapshotTransform, applet_radar_frames, build_echo_field, clamp_relief_pitch,
+    Alert, EchoField, Forecast, GeocodeHit, GestureCamera, HttpClient, Place, RadarFrame,
+    RadarLookback, RadarSpeed, Raster, ReliefCamera, SnapshotTransform,
+    applet_radar_frames_lookback, applet_radar_interval_ms, build_echo_field, clamp_relief_pitch,
     default_relief_camera, describe, display_icon, display_temperature, echo_grid,
     geocode_query_allowed, is_us_zip, is_zip_lookup, place_from_geocode_hit, render_relief,
     sample_echoes, snapshot_transform, symbolic_icon, zoom_toward,
@@ -94,6 +95,8 @@ pub struct AppModel {
     /// Playback frame to apply on the next settle when a gesture is in progress.
     deferred_shown_offset: Option<u32>,
     pub(crate) playing: bool,
+    pub(crate) radar_speed: RadarSpeed,
+    pub(crate) radar_lookback: RadarLookback,
     pub(crate) zoom: f64,
     pub(crate) pan_x: f64,
     pub(crate) pan_y: f64,
@@ -150,6 +153,12 @@ pub enum Message {
     Surface(cosmic::surface::Action<Message>),
     UpdateConfig(Config),
     StartupFetch,
+    /// Dev-only: open Radar popup when `COLDFRONT_VERIFY` is set.
+    VerifyOpenRadar,
+    /// Dev-only: expand radar when `COLDFRONT_VERIFY_EXPAND` is set.
+    VerifyExpandRadar,
+    /// Dev-only: nudge pan for screenshot proof when `COLDFRONT_VERIFY_PAN` is set.
+    VerifyNudgePan,
     RefreshWeather,
     ZipDraft(String),
     SaveZip,
@@ -172,6 +181,8 @@ pub enum Message {
     TabActivated(segmented_button::Entity),
     UnitActivated(segmented_button::Entity),
     TogglePlay,
+    CycleRadarSpeed,
+    CycleRadarLookback,
     FrameSlider(u32),
     AdvanceRadar,
     ZoomIn,
@@ -282,6 +293,8 @@ impl cosmic::Application for AppModel {
             shown_offset: 0,
             deferred_shown_offset: None,
             playing: true,
+            radar_speed: RadarSpeed::X1,
+            radar_lookback: RadarLookback::Hours1,
             zoom: 7.0,
             pan_x: 0.0,
             pan_y: 0.0,
@@ -362,8 +375,9 @@ impl cosmic::Application for AppModel {
             && self.playing
             && self.frames_ready.len() > 1
         {
+            let interval_ms = u64::from(applet_radar_interval_ms(self.radar_speed));
             subscriptions.push(
-                cosmic::iced::time::every(Duration::from_millis(800))
+                cosmic::iced::time::every(Duration::from_millis(interval_ms))
                     .map(|_| Message::AdvanceRadar),
             );
         }
@@ -402,9 +416,52 @@ impl cosmic::Application for AppModel {
                     return Task::none();
                 }
                 self.startup_fetch_done = true;
+                let mut tasks = Vec::new();
                 if self.config.has_weather_location() {
-                    return self.start_weather_load(false);
+                    tasks.push(self.start_weather_load(false));
                 }
+                if std::env::var_os("COLDFRONT_VERIFY").is_some() {
+                    tasks.push(cosmic::task::future(async {
+                        tokio::time::sleep(Duration::from_millis(2000)).await;
+                        Message::VerifyOpenRadar
+                    }));
+                }
+                return Task::batch(tasks);
+            }
+            Message::VerifyOpenRadar => {
+                let mut tasks = Vec::new();
+                if self.popup.is_none() {
+                    tasks.push(self.toggle_popup());
+                }
+                tasks.push(self.select_tab(PopupTab::Radar));
+                if std::env::var_os("COLDFRONT_VERIFY_EXPAND").is_some() {
+                    tasks.push(cosmic::task::future(async {
+                        tokio::time::sleep(Duration::from_millis(5000)).await;
+                        Message::VerifyExpandRadar
+                    }));
+                }
+                if std::env::var_os("COLDFRONT_VERIFY_PAN").is_some() {
+                    tasks.push(cosmic::task::future(async {
+                        tokio::time::sleep(Duration::from_millis(3500)).await;
+                        Message::VerifyNudgePan
+                    }));
+                }
+                return Task::batch(tasks);
+            }
+            Message::VerifyExpandRadar => {
+                if self.radar_expanded {
+                    return Task::none();
+                }
+                let Some(id) = self.core.main_window_id().or(self.popup) else {
+                    return Task::none();
+                };
+                return window::monitor_size(id)
+                    .map(|size| cosmic::Action::App(Message::RadarExpandWith(size)));
+            }
+            Message::VerifyNudgePan => {
+                self.pan_x += 120.0;
+                self.gesturing = true;
+                return self.settle_now();
             }
             Message::RefreshWeather => {
                 if self.config.has_weather_location() {
@@ -508,9 +565,16 @@ impl cosmic::Application for AppModel {
                 }
             }
             Message::TogglePlay => self.playing = !self.playing,
+            Message::CycleRadarSpeed => {
+                self.radar_speed = self.radar_speed.next();
+            }
+            Message::CycleRadarLookback => {
+                self.radar_lookback = self.radar_lookback.next();
+                return self.apply_lookback_change();
+            }
             Message::FrameSlider(index) => {
                 self.playing = false;
-                if let Some(offset) = frame_offset_at(index as usize) {
+                if let Some(offset) = self.frame_offset_at(index as usize) {
                     self.shown_offset = offset;
                     if self.gesturing {
                         return self.schedule_settle();
@@ -527,6 +591,7 @@ impl cosmic::Application for AppModel {
                 let (view_width, view_height) = self.map_size();
                 self.relief_camera = default_relief_camera(view_width, view_height);
                 self.gesturing = true;
+                let _ = self.recompose_current();
                 return self.schedule_settle();
             }
             Message::ToggleRadarMode => {
@@ -601,6 +666,10 @@ impl cosmic::Application for AppModel {
                         self.pan_x = pan_x + f64::from(point.x - start.x);
                         self.pan_y = pan_y + f64::from(point.y - start.y);
                         self.gesturing = true;
+                        // Paint from cache at the live camera so the stage stays
+                        // filled. snapshot_transform alone slides the old bitmap
+                        // off the window until settle.
+                        let _ = self.recompose_current();
                     }
                     Some(DragState::Orbit { start, yaw, pitch }) => {
                         self.relief_camera.yaw = yaw + (point.x - start.x) * 0.005;
@@ -694,6 +763,12 @@ impl cosmic::Application for AppModel {
                 }
                 if !self.camera_matches(zoom, pan_x, pan_y) {
                     return Task::batch([next, self.schedule_settle()]);
+                }
+                // Playback may have moved shown_offset while this fetch ran.
+                // Paint the live offset from the tiles this response just cached.
+                if self.recompose_current() {
+                    let prefetch = self.schedule_prefetch();
+                    return Task::batch([next, prefetch]);
                 }
                 return next;
             }
@@ -1048,6 +1123,7 @@ impl AppModel {
         let (view_width, view_height) = self.map_size();
         let pixel_ratio = self.pixel_ratio;
         let shown_offset = self.shown_offset;
+        let lookback = self.radar_lookback;
         let mut cache = self.tile_cache.clone();
         cosmic::task::future(async move {
             let client = match HttpClient::new() {
@@ -1059,7 +1135,7 @@ impl AppModel {
                     };
                 }
             };
-            let frames = applet_radar_frames();
+            let frames = applet_radar_frames_lookback(lookback);
             let latest = frames.last().map(|frame| frame.offset_minutes).unwrap_or(0);
             let first_offset = if frames
                 .iter()
@@ -1260,9 +1336,17 @@ impl AppModel {
         }
     }
 
-    fn recompose_current(&mut self) {
+    /// Paint the shown offset from `tile_cache` at the live camera. Returns
+    /// false when composition fails. During pan/zoom, still paint when radar
+    /// tiles are missing so the stage stays filled (pale holes beat sliding
+    /// the old bitmap off-screen).
+    fn recompose_current(&mut self) -> bool {
+        self.recompose_at_live_camera(self.gesturing)
+    }
+
+    fn recompose_at_live_camera(&mut self, fill_when_empty_radar: bool) -> bool {
         let Some(place) = &self.place else {
-            return;
+            return false;
         };
         let (view_width, view_height) = self.map_size();
         let (viewport, frac_scale) = mapload::viewport_for(
@@ -1289,10 +1373,10 @@ impl AppModel {
                 present,
                 self.shown_offset,
             ) else {
-                return;
+                return false;
             };
-            if radar_tiles == 0 && self.map_handle.is_some() {
-                return;
+            if radar_tiles == 0 && self.map_handle.is_some() && !fill_when_empty_radar {
+                return false;
             }
             let (cols, rows) = echo_grid(radar.width, radar.height);
             let echoes = sample_echoes(&radar.pixels, radar.width, radar.height, cols, rows);
@@ -1310,7 +1394,7 @@ impl AppModel {
                 self.pan_x,
                 self.pan_y,
             );
-            return;
+            return true;
         }
         self.relief_empty = false;
         let Ok(frame) = mapload::compose_cached(
@@ -1320,10 +1404,10 @@ impl AppModel {
             present,
             self.shown_offset,
         ) else {
-            return;
+            return false;
         };
-        if frame.radar_tiles == 0 && self.map_handle.is_some() {
-            return;
+        if frame.radar_tiles == 0 && self.map_handle.is_some() && !fill_when_empty_radar {
+            return false;
         }
         self.radar_tiles = frame.radar_tiles;
         self.present_snapshot(
@@ -1334,6 +1418,7 @@ impl AppModel {
             self.pan_x,
             self.pan_y,
         );
+        true
     }
 
     fn paint_relief_from_cache(&mut self) {
@@ -1381,7 +1466,8 @@ impl AppModel {
             .filter(|offset| *offset != shown_offset)
             .collect();
         // Same order as reload_map: `.last()` loads next, so reverse chrono.
-        let pending: Vec<u32> = applet_radar_frames()
+        let pending: Vec<u32> = self
+            .radar_frames()
             .into_iter()
             .rev()
             .map(|frame| frame.offset_minutes)
@@ -1430,7 +1516,8 @@ impl AppModel {
     }
 
     fn advance_radar(&mut self) -> Task<cosmic::Action<Message>> {
-        let sequence: Vec<u32> = applet_radar_frames()
+        let sequence: Vec<u32> = self
+            .radar_frames()
             .into_iter()
             .map(|frame| frame.offset_minutes)
             .filter(|offset| self.frames_ready.contains(offset))
@@ -1451,7 +1538,11 @@ impl AppModel {
             return self.schedule_settle();
         }
         self.shown_offset = next_shown;
-        self.settle_now()
+        // Cache-only paint. settle_now bumps map_generation and cancels in-flight
+        // fullscreen refreshes, which freezes playback on large maps.
+        self.gesturing = false;
+        let _ = self.recompose_current();
+        Task::none()
     }
 
     fn apply_deferred_shown_offset(&mut self) {
@@ -1483,6 +1574,7 @@ impl AppModel {
         self.pan_x = next.pan_x;
         self.pan_y = next.pan_y;
         self.gesturing = true;
+        let _ = self.recompose_current();
         self.schedule_settle()
     }
 
@@ -1516,6 +1608,7 @@ impl AppModel {
                 self.pan_x = next.pan_x;
                 self.pan_y = next.pan_y;
                 self.gesturing = true;
+                let _ = self.recompose_current();
                 self.schedule_settle()
             }
             ScrollDelta::Pixels { x, y } => {
@@ -1539,11 +1632,13 @@ impl AppModel {
                     self.pan_x = next.pan_x;
                     self.pan_y = next.pan_y;
                     self.gesturing = true;
+                    let _ = self.recompose_current();
                     self.schedule_settle()
                 } else {
                     self.pan_x += f64::from(x);
                     self.pan_y += f64::from(y);
                     self.gesturing = true;
+                    let _ = self.recompose_current();
                     self.schedule_settle()
                 }
             }
@@ -1577,7 +1672,8 @@ impl AppModel {
         let (view_width, view_height) = self.map_size();
         let pixel_ratio = self.pixel_ratio;
         let shown_offset = self.shown_offset;
-        let sequence: Vec<u32> = applet_radar_frames()
+        let sequence: Vec<u32> = self
+            .radar_frames()
             .into_iter()
             .map(|frame| frame.offset_minutes)
             .filter(|offset| self.frames_ready.contains(offset))
@@ -1680,14 +1776,64 @@ impl AppModel {
     }
 
     pub(crate) fn frame_index(&self) -> u32 {
-        applet_radar_frames()
+        self.radar_frames()
             .iter()
             .position(|frame| frame.offset_minutes == self.shown_offset)
             .unwrap_or(0) as u32
     }
 
     pub(crate) fn frame_count(&self) -> u32 {
-        applet_radar_frames().len().saturating_sub(1) as u32
+        self.radar_frames().len().saturating_sub(1) as u32
+    }
+
+    pub(crate) fn radar_speed_label(&self) -> String {
+        format!("{}×", self.radar_speed.multiplier())
+    }
+
+    pub(crate) fn radar_lookback_label(&self) -> String {
+        format!("{}h", self.radar_lookback.hours())
+    }
+
+    fn radar_frames(&self) -> Vec<RadarFrame> {
+        applet_radar_frames_lookback(self.radar_lookback)
+    }
+
+    fn frame_offset_at(&self, index: usize) -> Option<u32> {
+        self.radar_frames()
+            .get(index)
+            .map(|frame| frame.offset_minutes)
+    }
+
+    /// Grow or shrink the playback list without clearing the tile cache.
+    fn apply_lookback_change(&mut self) -> Task<cosmic::Action<Message>> {
+        let allowed: Vec<u32> = self
+            .radar_frames()
+            .into_iter()
+            .map(|frame| frame.offset_minutes)
+            .collect();
+        let (pending, ready, shown) = merge_lookback_offsets(
+            &allowed,
+            &self.pending_offsets,
+            &self.frames_ready,
+            self.shown_offset,
+        );
+        self.pending_offsets = pending;
+        self.frames_ready = ready;
+        let shown_changed = shown != self.shown_offset;
+        self.shown_offset = shown;
+        if !self.radar_opened || self.place.is_none() {
+            return Task::none();
+        }
+        if shown_changed {
+            if self.gesturing {
+                return self.schedule_settle();
+            }
+            return self.settle_now();
+        }
+        if self.pending_offsets.is_empty() {
+            return Task::none();
+        }
+        self.load_next_frame()
     }
 
     pub(crate) fn current_frame_label(&self) -> String {
@@ -1697,9 +1843,10 @@ impl AppModel {
     pub(crate) fn map_size(&self) -> (u32, u32) {
         if self.radar_expanded {
             let size = self.popup_size();
+            // Timeline sits on the map. Reserve header, tabs, and caption only.
             (
                 (size.width - 48.0).max(400.0) as u32,
-                (size.height - 220.0).max(240.0) as u32,
+                (size.height - 200.0).max(240.0) as u32,
             )
         } else {
             (MAP_VIEW_WIDTH, MAP_VIEW_HEIGHT)
@@ -1728,10 +1875,42 @@ fn frame_label(offset: u32) -> String {
     }
 }
 
-fn frame_offset_at(index: usize) -> Option<u32> {
-    applet_radar_frames()
-        .get(index)
-        .map(|frame| frame.offset_minutes)
+/// Merge pending and ready offsets when lookback changes.
+///
+/// Growing appends missing offsets behind the current pending queue (latest-first
+/// via the allowed list order). Shrinking drops offsets outside the new list.
+pub(crate) fn merge_lookback_offsets(
+    allowed: &[u32],
+    pending: &[u32],
+    ready: &[u32],
+    shown_offset: u32,
+) -> (Vec<u32>, Vec<u32>, u32) {
+    let allowed_set: std::collections::HashSet<u32> = allowed.iter().copied().collect();
+    let ready: Vec<u32> = ready
+        .iter()
+        .copied()
+        .filter(|offset| allowed_set.contains(offset))
+        .collect();
+    let mut pending: Vec<u32> = pending
+        .iter()
+        .copied()
+        .filter(|offset| allowed_set.contains(offset))
+        .collect();
+    // Allowed is oldest→newest; reverse so `.last()` loads nearer frames first.
+    for offset in allowed.iter().rev().copied() {
+        if ready.contains(&offset) || pending.contains(&offset) {
+            continue;
+        }
+        pending.insert(0, offset);
+    }
+    let shown = if allowed_set.contains(&shown_offset) {
+        shown_offset
+    } else {
+        allowed.last().copied().unwrap_or(0)
+    };
+    // Do not queue the frame already on screen.
+    pending.retain(|offset| *offset != shown);
+    (pending, ready, shown)
 }
 
 fn build_tab_model(active: PopupTab) -> segmented_button::SingleSelectModel {
@@ -1835,8 +2014,11 @@ pub(crate) fn playback_advance_during_gesture(
 
 #[cfg(test)]
 mod tests {
+    use coldfront_core::{RadarSpeed, applet_radar_interval_ms};
+
     use super::{
-        format_panel_temperature, playback_advance_during_gesture, prefetch_absorb_allowed,
+        format_panel_temperature, merge_lookback_offsets, playback_advance_during_gesture,
+        prefetch_absorb_allowed,
     };
 
     #[test]
@@ -1860,5 +2042,41 @@ mod tests {
         let (shown, deferred) = playback_advance_during_gesture(false, 50, 40);
         assert_eq!(shown, 40);
         assert_eq!(deferred, None);
+    }
+
+    #[test]
+    fn radar_interval_scales_with_speed() {
+        assert_eq!(applet_radar_interval_ms(RadarSpeed::X1), 800);
+        assert_eq!(applet_radar_interval_ms(RadarSpeed::X2), 400);
+        assert_eq!(applet_radar_interval_ms(RadarSpeed::X4), 200);
+    }
+
+    #[test]
+    fn lookback_grow_queues_missing_behind_pending() {
+        let allowed = [120, 110, 100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0];
+        let pending = vec![10, 20, 30, 40, 50];
+        let ready = vec![0];
+        let (next_pending, next_ready, shown) =
+            merge_lookback_offsets(&allowed, &pending, &ready, 0);
+        assert_eq!(shown, 0);
+        assert_eq!(next_ready, vec![0]);
+        assert_eq!(next_pending.last().copied(), Some(50));
+        assert!(next_pending.starts_with(&[120, 110, 100, 90, 80, 70, 60]));
+        assert!(!next_pending.contains(&0));
+    }
+
+    #[test]
+    fn lookback_shrink_drops_outside_offsets() {
+        let allowed = [50, 40, 30, 20, 10, 0];
+        let pending = vec![120, 60, 10];
+        let ready = vec![0, 50, 180];
+        let (next_pending, next_ready, shown) =
+            merge_lookback_offsets(&allowed, &pending, &ready, 180);
+        assert_eq!(shown, 0);
+        assert_eq!(next_ready, vec![0, 50]);
+        assert!(!next_pending.contains(&120));
+        assert!(!next_pending.contains(&60));
+        assert!(!next_pending.contains(&180));
+        assert!(!next_pending.contains(&0));
     }
 }

@@ -16,6 +16,72 @@ pub const MAP_DISPLAY_HEIGHT: u32 = 260;
 pub const APPLET_ZOOM_MIN: u32 = 5;
 pub const APPLET_ZOOM_MAX: u32 = 11;
 pub const TILE_SIZE: u32 = 256;
+/// Default web radar playback interval (1×).
+pub const WEB_RADAR_INTERVAL_MS: u32 = 750;
+/// Default applet radar playback interval (1×).
+pub const APPLET_RADAR_INTERVAL_MS: u32 = 800;
+/// Web frame step in minutes.
+pub const WEB_RADAR_STEP_MINUTES: u32 = 5;
+/// Applet frame step in minutes (2h and 3h lookbacks).
+pub const APPLET_RADAR_STEP_MINUTES: u32 = 10;
+
+/// Session lookback for the radar loop. Default is one hour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RadarLookback {
+    Hours1,
+    Hours2,
+    Hours3,
+}
+
+impl RadarLookback {
+    #[must_use]
+    pub const fn hours(self) -> u32 {
+        match self {
+            Self::Hours1 => 1,
+            Self::Hours2 => 2,
+            Self::Hours3 => 3,
+        }
+    }
+
+    /// Cycle 1h → 2h → 3h → 1h.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Hours1 => Self::Hours2,
+            Self::Hours2 => Self::Hours3,
+            Self::Hours3 => Self::Hours1,
+        }
+    }
+}
+
+/// Session playback speed multiplier for the radar loop. Default is 1×.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RadarSpeed {
+    X1,
+    X2,
+    X4,
+}
+
+impl RadarSpeed {
+    #[must_use]
+    pub const fn multiplier(self) -> u32 {
+        match self {
+            Self::X1 => 1,
+            Self::X2 => 2,
+            Self::X4 => 4,
+        }
+    }
+
+    /// Cycle 1× → 2× → 4× → 1×.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::X1 => Self::X2,
+            Self::X2 => Self::X4,
+            Self::X4 => Self::X1,
+        }
+    }
+}
 
 /// One radar animation frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,29 +173,103 @@ impl MapViewport {
 /// Twelve frames, every five minutes from 55 minutes ago through the latest scan.
 #[must_use]
 pub fn web_radar_frames() -> Vec<RadarFrame> {
-    web_radar_frames_at(Timestamp::now())
+    web_radar_frames_lookback(RadarLookback::Hours1)
+}
+
+/// Web radar frames for a lookback using the current time.
+#[must_use]
+pub fn web_radar_frames_lookback(lookback: RadarLookback) -> Vec<RadarFrame> {
+    web_radar_frames_for(lookback, Timestamp::now())
 }
 
 /// Same as [`web_radar_frames`], with a fixed `now` for tests.
 #[must_use]
 pub fn web_radar_frames_at(now: Timestamp) -> Vec<RadarFrame> {
-    (0..=11).rev().map(|step| frame(step * 5, now)).collect()
+    web_radar_frames_for(RadarLookback::Hours1, now)
+}
+
+/// Web radar frames for a lookback. Step stays five minutes.
+///
+/// One hour keeps the historic 55…0 list. Two and three hours run from
+/// `hours * 60` through 0.
+#[must_use]
+pub fn web_radar_frames_for(lookback: RadarLookback, now: Timestamp) -> Vec<RadarFrame> {
+    match lookback {
+        RadarLookback::Hours1 => (0..=11)
+            .rev()
+            .map(|step| frame(step * WEB_RADAR_STEP_MINUTES, now))
+            .collect(),
+        RadarLookback::Hours2 | RadarLookback::Hours3 => {
+            let oldest = lookback.hours() * 60;
+            let steps = oldest / WEB_RADAR_STEP_MINUTES;
+            (0..=steps)
+                .rev()
+                .map(|step| frame(step * WEB_RADAR_STEP_MINUTES, now))
+                .collect()
+        }
+    }
 }
 
 /// Six frames, every ten minutes. Fewer tiles than the web loop, so the popup
 /// can show the latest scan quickly and then animate.
 #[must_use]
 pub fn applet_radar_frames() -> Vec<RadarFrame> {
-    applet_radar_frames_at(Timestamp::now())
+    applet_radar_frames_lookback(RadarLookback::Hours1)
+}
+
+/// Applet radar frames for a lookback using the current time.
+#[must_use]
+pub fn applet_radar_frames_lookback(lookback: RadarLookback) -> Vec<RadarFrame> {
+    applet_radar_frames_for(lookback, Timestamp::now())
 }
 
 /// Same as [`applet_radar_frames`], with a fixed `now` for tests.
 #[must_use]
 pub fn applet_radar_frames_at(now: Timestamp) -> Vec<RadarFrame> {
-    [50, 40, 30, 20, 10, 0]
-        .into_iter()
-        .map(|offset| frame(offset, now))
-        .collect()
+    applet_radar_frames_for(RadarLookback::Hours1, now)
+}
+
+/// Applet radar frames for a lookback. One hour keeps offsets 50…0.
+/// Two and three hours use ten-minute steps from `hours * 60` through 0.
+#[must_use]
+pub fn applet_radar_frames_for(lookback: RadarLookback, now: Timestamp) -> Vec<RadarFrame> {
+    match lookback {
+        RadarLookback::Hours1 => [50, 40, 30, 20, 10, 0]
+            .into_iter()
+            .map(|offset| frame(offset, now))
+            .collect(),
+        RadarLookback::Hours2 | RadarLookback::Hours3 => {
+            let oldest = lookback.hours() * 60;
+            let steps = oldest / APPLET_RADAR_STEP_MINUTES;
+            (0..=steps)
+                .rev()
+                .map(|step| frame(step * APPLET_RADAR_STEP_MINUTES, now))
+                .collect()
+        }
+    }
+}
+
+/// One radar frame for an arbitrary offset using the current time.
+#[must_use]
+pub fn radar_frame_at(offset_minutes: u32) -> RadarFrame {
+    frame(offset_minutes, Timestamp::now())
+}
+
+/// Web playback interval for a speed multiplier (1× / 2× / 4×).
+#[must_use]
+pub fn web_radar_interval_ms(speed: RadarSpeed) -> u32 {
+    radar_interval_ms(WEB_RADAR_INTERVAL_MS, speed)
+}
+
+/// Applet playback interval for a speed multiplier (1× / 2× / 4×).
+#[must_use]
+pub fn applet_radar_interval_ms(speed: RadarSpeed) -> u32 {
+    radar_interval_ms(APPLET_RADAR_INTERVAL_MS, speed)
+}
+
+fn radar_interval_ms(base_ms: u32, speed: RadarSpeed) -> u32 {
+    let interval = f64::from(base_ms) / f64::from(speed.multiplier());
+    round_half_away_from_zero(interval).max(1) as u32
 }
 
 /// IEM tile layer for one animation offset.

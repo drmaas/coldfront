@@ -11,13 +11,14 @@ use std::fmt;
 
 use coldfront_core::{
     Alert, Error, Forecast, HttpClient, MapCamera, MapViewport, Place, RadarFrame, Raster,
-    applet_radar_frames, compose_viewport, compose_viewport_ground, compose_viewport_radar_layer,
-    denoise_radar_png, has_resolved_coordinates, iem_tile_url, is_us_zip, map_viewport,
-    maptiler_tile_url, osm_tile_url, scale_raster, tile_camera,
+    compose_viewport, compose_viewport_ground, compose_viewport_radar_layer, denoise_radar_png,
+    has_resolved_coordinates, iem_tile_url, is_us_zip, map_viewport, maptiler_tile_url,
+    osm_tile_url, radar_frame_at, scale_raster, tile_camera,
 };
 
-/// Compact Radar tab image. Narrower than the popup so zoom controls sit on the map.
-pub const MAP_VIEW_WIDTH: u32 = 400;
+/// Compact Radar tab image. Near full popup content width so the on-map timeline
+/// (lookback · slider · Now · Play · speed) fits beside the zoom plate.
+pub const MAP_VIEW_WIDTH: u32 = 416;
 pub const MAP_VIEW_HEIGHT: u32 = 220;
 const TILE_MARGIN: u32 = 1;
 const DENOISE_CAP: usize = 512;
@@ -290,20 +291,14 @@ pub async fn ensure_map_frames(
         request.view_width,
         request.view_height,
     );
-    let frames = applet_radar_frames();
-    let primary = frames
-        .iter()
-        .find(|item| item.offset_minutes == request.offset_minutes)
-        .ok_or_else(|| Error::Parse("unknown radar frame".into()))?;
-    fill_viewport_tiles(client, cache, kind, &viewport, primary).await;
+    let primary = radar_frame_at(request.offset_minutes);
+    fill_viewport_tiles(client, cache, kind, &viewport, &primary).await;
     for offset in extra_offsets {
         if *offset == request.offset_minutes {
             continue;
         }
-        let Some(frame) = frames.iter().find(|item| item.offset_minutes == *offset) else {
-            continue;
-        };
-        fill_viewport_tiles(client, cache, kind, &viewport, frame).await;
+        let frame = radar_frame_at(*offset);
+        fill_viewport_tiles(client, cache, kind, &viewport, &frame).await;
     }
     compose_cached(
         cache,
@@ -341,26 +336,20 @@ pub async fn prefetch_around(
             request.view_width,
             request.view_height,
         );
-        let frames = applet_radar_frames();
-        frames
-            .into_iter()
-            .find(|frame| frame.offset_minutes == offset)
-            .map(|frame| (viewport, frame))
+        (viewport, radar_frame_at(offset))
     };
-    if floor > coldfront_core::APPLET_ZOOM_MIN
-        && let Some((viewport, frame)) = warm(f64::from(floor - 1), request.offset_minutes)
-    {
+    if floor > coldfront_core::APPLET_ZOOM_MIN {
+        let (viewport, frame) = warm(f64::from(floor - 1), request.offset_minutes);
         fill_viewport_tiles(client, cache, kind, &viewport, &frame).await;
     }
-    if floor < coldfront_core::APPLET_ZOOM_MAX
-        && let Some((viewport, frame)) = warm(f64::from(floor + 1), request.offset_minutes)
-    {
+    if floor < coldfront_core::APPLET_ZOOM_MAX {
+        let (viewport, frame) = warm(f64::from(floor + 1), request.offset_minutes);
         fill_viewport_tiles(client, cache, kind, &viewport, &frame).await;
     }
     if let Some(offset) = next_offset
         && offset != request.offset_minutes
-        && let Some((viewport, frame)) = warm(request.zoom, offset)
     {
+        let (viewport, frame) = warm(request.zoom, offset);
         fill_viewport_tiles(client, cache, kind, &viewport, &frame).await;
     }
 }

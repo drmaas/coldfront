@@ -6,12 +6,14 @@ use std::fs;
 use std::path::PathBuf;
 
 use coldfront_core::{
-    OrthoFit, RouteTarget, applet_radar_frames_at, band_height, chart_points, day_label, describe,
-    display_icon, display_temperature, display_wind_mph, fit_ortho_half_extents, format_as_of,
-    format_clock_time, hour_label, iem_tile_url, is_us_zip, is_zip_lookup, lat_lon_to_tile,
-    location_path, next_hours, parse_alerts, parse_geocode_search, parse_open_meteo,
-    parse_route_path, parse_zippopotam, place_from_geocode_hit, range_placement,
-    round_half_away_from_zero, tile_window, web_radar_frames_at,
+    OrthoFit, RadarLookback, RadarSpeed, RouteTarget, applet_radar_frames_at,
+    applet_radar_frames_for, applet_radar_interval_ms, band_height, chart_points, day_label,
+    describe, display_icon, display_temperature, display_wind_mph, fit_ortho_half_extents,
+    format_as_of, format_clock_time, hour_label, iem_tile_url, is_us_zip, is_zip_lookup,
+    lat_lon_to_tile, location_path, next_hours, parse_alerts, parse_geocode_search,
+    parse_open_meteo, parse_route_path, parse_zippopotam, place_from_geocode_hit, range_placement,
+    round_half_away_from_zero, tile_window, web_radar_frames_at, web_radar_frames_for,
+    web_radar_interval_ms,
 };
 use serde_json::Value;
 
@@ -374,6 +376,70 @@ fn radar_tiles_and_frames_match_the_contract() {
         contract["applet_first_offset"].as_u64().unwrap() as u32
     );
     assert_eq!(applet.last().unwrap().label, "Latest scan");
+
+    let lookback = &contract["radar_lookback"];
+    let web_2h = web_radar_frames_for(RadarLookback::Hours2, now);
+    assert_eq!(
+        web_2h.len(),
+        lookback["web_2h_frames"].as_u64().unwrap() as usize
+    );
+    assert_eq!(
+        web_2h[0].offset_minutes,
+        lookback["web_2h_first_offset"].as_u64().unwrap() as u32
+    );
+    let web_3h = web_radar_frames_for(RadarLookback::Hours3, now);
+    assert_eq!(
+        web_3h.len(),
+        lookback["web_3h_frames"].as_u64().unwrap() as usize
+    );
+    assert_eq!(
+        web_3h[0].offset_minutes,
+        lookback["web_3h_first_offset"].as_u64().unwrap() as u32
+    );
+    let applet_2h = applet_radar_frames_for(RadarLookback::Hours2, now);
+    assert_eq!(
+        applet_2h.len(),
+        lookback["applet_2h_frames"].as_u64().unwrap() as usize
+    );
+    assert_eq!(
+        applet_2h[0].offset_minutes,
+        lookback["applet_2h_first_offset"].as_u64().unwrap() as u32
+    );
+    let applet_3h = applet_radar_frames_for(RadarLookback::Hours3, now);
+    assert_eq!(
+        applet_3h.len(),
+        lookback["applet_3h_frames"].as_u64().unwrap() as usize
+    );
+    assert_eq!(
+        applet_3h[0].offset_minutes,
+        lookback["applet_3h_first_offset"].as_u64().unwrap() as u32
+    );
+
+    let intervals = &contract["radar_intervals_ms"];
+    assert_eq!(
+        web_radar_interval_ms(RadarSpeed::X1),
+        intervals["web_1x"].as_u64().unwrap() as u32
+    );
+    assert_eq!(
+        web_radar_interval_ms(RadarSpeed::X2),
+        intervals["web_2x"].as_u64().unwrap() as u32
+    );
+    assert_eq!(
+        web_radar_interval_ms(RadarSpeed::X4),
+        intervals["web_4x"].as_u64().unwrap() as u32
+    );
+    assert_eq!(
+        applet_radar_interval_ms(RadarSpeed::X1),
+        intervals["applet_1x"].as_u64().unwrap() as u32
+    );
+    assert_eq!(
+        applet_radar_interval_ms(RadarSpeed::X2),
+        intervals["applet_2x"].as_u64().unwrap() as u32
+    );
+    assert_eq!(
+        applet_radar_interval_ms(RadarSpeed::X4),
+        intervals["applet_4x"].as_u64().unwrap() as u32
+    );
 }
 
 #[test]

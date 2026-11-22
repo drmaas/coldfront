@@ -118,6 +118,24 @@
   },
   "applet_frames": 6,
   "applet_first_offset": 50,
+  "radar_lookback": {
+    "web_2h_frames": 25,
+    "web_2h_first_offset": 120,
+    "web_3h_frames": 37,
+    "web_3h_first_offset": 180,
+    "applet_2h_frames": 13,
+    "applet_2h_first_offset": 120,
+    "applet_3h_frames": 19,
+    "applet_3h_first_offset": 180
+  },
+  "radar_intervals_ms": {
+    "web_1x": 750,
+    "web_2x": 375,
+    "web_4x": 188,
+    "applet_1x": 800,
+    "applet_2x": 400,
+    "applet_4x": 200
+  },
   "codes": [
     {
       "code": 0,

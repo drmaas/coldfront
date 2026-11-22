@@ -425,6 +425,8 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
         map_placeholder(fl!("loading-radar"), width, height)
     };
 
+    // Pan/zoom only on the canvas. Overlay widgets above return None outside
+    // their controls so Stack still delivers events to this mouse_area.
     let interaction = if app.dragging() {
         mouse::Interaction::Grabbing
     } else {
@@ -502,53 +504,69 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
             style
         });
 
-    let overlay = widget::container(plate)
+    // Align plate top-right. Empty Fill area reports no interaction, so pan works.
+    let zoom_overlay = widget::container(plate)
         .width(Length::Fill)
         .height(Length::Fill)
         .align_x(cosmic::iced::alignment::Horizontal::Right)
         .align_y(cosmic::iced::alignment::Vertical::Top)
         .padding([8, 10]);
 
-    let stage = cosmic::iced::widget::Stack::new()
-        .width(Length::Fixed(width as f32))
-        .height(Length::Fixed(height as f32))
-        .push(map)
-        .push(overlay)
-        .clip(true);
-
     let play = if app.playing {
         fl!("pause")
     } else {
         fl!("play")
     };
-    let timeline = widget::Row::new()
-        .spacing(spacing.space_xs)
-        .align_y(Alignment::Center)
-        .push(widget::text::caption(fl!("minutes-ago", minutes = 50i64)))
-        .push(
-            widget::slider(
-                0..=app.frame_count(),
-                app.frame_index(),
-                Message::FrameSlider,
+    // On-map timeline: lookback · slider · Now · Play · speed. Stays visible in
+    // both compact and fullscreen (below-map row was clipped by 480×440 chrome).
+    let timeline = widget::container(
+        widget::Row::new()
+            .spacing(spacing.space_xs)
+            .align_y(Alignment::Center)
+            .push(widget::tooltip::tooltip(
+                widget::button::text(app.radar_lookback_label())
+                    .on_press(Message::CycleRadarLookback),
+                widget::text::body(fl!("tooltip-radar-lookback")),
+                widget::tooltip::Position::Top,
+            ))
+            .push(
+                widget::slider(
+                    0..=app.frame_count(),
+                    app.frame_index(),
+                    Message::FrameSlider,
+                )
+                .width(Length::Fill),
             )
-            .width(Length::Fill),
-        )
-        .push(widget::text::caption(fl!("latest-scan")))
-        .push(
-            widget::button::text(if app.radar_expanded {
-                fl!("radar-restore")
-            } else {
-                fl!("radar-expand")
-            })
-            .on_press(Message::ToggleRadarExpand),
-        )
-        .push(widget::button::text(play).on_press(Message::TogglePlay));
+            .push(widget::text::caption(fl!("now")))
+            .push(widget::button::text(play).on_press(Message::TogglePlay))
+            .push(widget::tooltip::tooltip(
+                widget::button::text(app.radar_speed_label()).on_press(Message::CycleRadarSpeed),
+                widget::text::body(fl!("tooltip-radar-speed")),
+                widget::tooltip::Position::Top,
+            )),
+    )
+    .width(Length::Fill)
+    .padding([6, 8])
+    .style(popup_fill);
+
+    let timeline_overlay = widget::Column::new()
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .push(widget::space::vertical())
+        .push(timeline);
+
+    let stage = cosmic::iced::widget::Stack::new()
+        .width(Length::Fixed(width as f32))
+        .height(Length::Fixed(height as f32))
+        .push(map)
+        .push(zoom_overlay)
+        .push(timeline_overlay)
+        .clip(true);
 
     let mut col = widget::Column::new()
         .spacing(spacing.space_xxs)
         .width(Length::Fill)
         .push(stage)
-        .push(timeline)
         .push(widget::text::caption(format!(
             "{} · {}",
             app.current_frame_caption(),

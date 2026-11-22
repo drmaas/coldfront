@@ -130,7 +130,13 @@ mod tests {
 
     #[test]
     fn symbolic_icon_maps_precip_types() {
-        for icon in ["drizzle", "rain", "rain-showers", "freezing-drizzle", "freezing-rain"] {
+        for icon in [
+            "drizzle",
+            "rain",
+            "rain-showers",
+            "freezing-drizzle",
+            "freezing-rain",
+        ] {
             assert_eq!(symbolic_icon(icon), "weather-showers-symbolic");
         }
         for icon in ["snow", "snow-showers"] {

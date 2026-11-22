@@ -207,6 +207,16 @@ fn header(app: &AppModel) -> Element<'_, Message> {
         }
     }
 
+    let refresh_enabled = app.config.has_weather_location() && !app.weather_loading;
+    let refresh_btn = widget::tooltip::tooltip(
+        widget::button::icon(widget::icon::from_name("view-refresh-symbolic"))
+            .on_press_maybe(refresh_enabled.then_some(Message::RefreshWeather))
+            .padding(spacing.space_xs),
+        widget::text::body(fl!("tooltip-refresh")),
+        widget::tooltip::Position::Bottom,
+    )
+    .gap(spacing.space_xxxs);
+
     let alerts_btn = widget::tooltip::tooltip(
         widget::button::icon(widget::icon::from_name(if app.alerts.is_empty() {
             "weather-clear-symbolic"
@@ -231,6 +241,7 @@ fn header(app: &AppModel) -> Element<'_, Message> {
 
     let actions = widget::Row::new()
         .spacing(spacing.space_xxs)
+        .push(refresh_btn)
         .push(alerts_btn)
         .push(settings_btn);
 

@@ -129,10 +129,19 @@ pub fn popup(app: &AppModel) -> Element<'_, Message> {
         PopupTab::Settings => settings_tab(app),
     };
 
+    // Embed the scrollbar so it keeps layout space. The default overlay scroller
+    // paints on top of full-width controls and clips their right edge.
     let tab_body: Element<'_, Message> = if app.active_tab == PopupTab::Radar {
         tab_body
     } else {
         widget::scrollable(tab_body)
+            .direction(ScrollDir::Vertical(
+                Scrollbar::new()
+                    .width(8)
+                    .scroller_width(8)
+                    .padding(8)
+                    .spacing(spacing.space_xxs),
+            ))
             .height(Length::Fill)
             .width(Length::Fill)
             .into()
@@ -850,16 +859,20 @@ fn settings_tab(app: &AppModel) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
     let zip = widget::text_input(fl!("location-placeholder"), &app.zip_draft)
         .on_input(Message::ZipDraft)
-        .on_submit(|_| Message::SaveZip);
+        .on_submit(|_| Message::SaveZip)
+        .width(Length::Fill);
     let key = widget::text_input(fl!("maptiler-placeholder"), &app.key_draft)
         .on_input(Message::KeyDraft)
-        .on_submit(|_| Message::SaveKey);
+        .on_submit(|_| Message::SaveKey)
+        .width(Length::Fill);
     let mut column = widget::Column::new()
-        .spacing(spacing.space_s)
+        .spacing(spacing.space_xs)
+        .width(Length::Fill)
         .push(widget::text::title4(fl!("tooltip-settings")))
         .push(
             widget::Row::new()
                 .spacing(spacing.space_xs)
+                .width(Length::Fill)
                 .push(zip)
                 .push(widget::button::suggested(fl!("save-location")).on_press(Message::SaveZip)),
         );
@@ -871,7 +884,11 @@ fn settings_tab(app: &AppModel) -> Element<'_, Message> {
     }
     for (index, hit) in app.geocode_hits.iter().enumerate() {
         let label = format_geocode_label(hit);
-        column = column.push(widget::button::standard(label).on_press(Message::PickGeocode(index)));
+        column = column.push(
+            widget::button::standard(label)
+                .on_press(Message::PickGeocode(index))
+                .width(Length::Fill),
+        );
     }
     column
         .push(widget::text::caption(fl!("units")))
@@ -880,8 +897,13 @@ fn settings_tab(app: &AppModel) -> Element<'_, Message> {
                 .on_activate(Message::UnitActivated),
         )
         .push(widget::text::caption(fl!("maptiler-key")))
-        .push(key)
-        .push(widget::button::standard(fl!("save-key")).on_press(Message::SaveKey))
+        .push(
+            widget::Row::new()
+                .spacing(spacing.space_xs)
+                .width(Length::Fill)
+                .push(key)
+                .push(widget::button::standard(fl!("save-key")).on_press(Message::SaveKey)),
+        )
         .push(widget::settings::item(
             fl!("osm-basemap"),
             widget::toggler(app.config.allow_osm_basemap).on_toggle(Message::ToggleOsm),

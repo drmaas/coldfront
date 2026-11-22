@@ -512,6 +512,25 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
         .align_y(cosmic::iced::alignment::Vertical::Top)
         .padding([8, 10]);
 
+    let clock = widget::container(widget::text::caption(app.current_frame_clock()))
+        .padding([4, 8])
+        .style(|theme| {
+            let cosmic = theme.cosmic();
+            let mut style = popup_fill(theme);
+            style.border = cosmic::iced::Border {
+                width: 1.0,
+                radius: cosmic.corner_radii.radius_s.into(),
+                color: style.border.color,
+            };
+            style
+        });
+    let clock_overlay = widget::container(clock)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(cosmic::iced::alignment::Horizontal::Left)
+        .align_y(cosmic::iced::alignment::Vertical::Top)
+        .padding([8, 10]);
+
     let play = if app.playing {
         fl!("pause")
     } else {
@@ -559,6 +578,7 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
         .width(Length::Fixed(width as f32))
         .height(Length::Fixed(height as f32))
         .push(map)
+        .push(clock_overlay)
         .push(zoom_overlay)
         .push(timeline_overlay)
         .clip(true);

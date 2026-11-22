@@ -13,7 +13,9 @@ import {
   displayWindMph,
   formatAsOf,
   formatClockTime,
+  formatRadarClock,
   hourLabel,
+  nextPlaybackStep,
   iemTileUrl,
   isUsZip,
   latLonToTile,
@@ -97,8 +99,20 @@ const contract = fixture("contract.json") as {
   window: { zoom: number; span: number; origin_x: number; origin_y: number; pin_x: number; pin_y: number };
   radar_now: string;
   web_frames: number;
-  web_first: { offset_minutes: number; layer: string; label: string };
-  web_last: { offset_minutes: number; layer: string; label: string };
+  web_first: {
+    offset_minutes: number;
+    instant: string;
+    layer: string;
+    label: string;
+    clock_chicago: string;
+  };
+  web_last: {
+    offset_minutes: number;
+    instant: string;
+    layer: string;
+    label: string;
+    clock_chicago: string;
+  };
   applet_frames: number;
   applet_first_offset: number;
   radar_lookback: {
@@ -290,11 +304,19 @@ describe("shared fixtures", () => {
       layer: contract.web_first.layer,
       label: contract.web_first.label,
     });
+    expect(web[0].instantMs).toBe(Date.parse(contract.web_first.instant));
+    expect(formatRadarClock(web[0].instantMs, "America/Chicago")).toBe(
+      contract.web_first.clock_chicago,
+    );
     expect(web.at(-1)).toMatchObject({
       offsetMinutes: contract.web_last.offset_minutes,
       layer: contract.web_last.layer,
       label: contract.web_last.label,
     });
+    expect(web.at(-1)!.instantMs).toBe(Date.parse(contract.web_last.instant));
+    expect(formatRadarClock(web.at(-1)!.instantMs, "America/Chicago")).toBe(
+      contract.web_last.clock_chicago,
+    );
     const applet = appletRadarFrames(now);
     expect(applet).toHaveLength(contract.applet_frames);
     expect(applet[0].offsetMinutes).toBe(contract.applet_first_offset);
@@ -319,6 +341,15 @@ describe("shared fixtures", () => {
     expect(appletRadarIntervalMs(1)).toBe(intervals.applet_1x);
     expect(appletRadarIntervalMs(2)).toBe(intervals.applet_2x);
     expect(appletRadarIntervalMs(4)).toBe(intervals.applet_4x);
+    expect(formatRadarClock(web[0].instantMs, "America/Chicago")).toBe(
+      contract.web_first.clock_chicago,
+    );
+    expect(
+      nextPlaybackStep([50, 40, 30, 0], new Set([0, 50]), new Set([40]), 50),
+    ).toEqual({ kind: "wait" });
+    expect(
+      nextPlaybackStep([50, 40, 30, 0], new Set([0, 50, 40]), new Set(), 50),
+    ).toEqual({ kind: "advance", offsetMinutes: 40 });
   });
 
   it("matches relief band heights and ortho fit", () => {

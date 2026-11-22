@@ -148,6 +148,24 @@ export async function fetchViewTiles(
   await Promise.all(jobs);
 }
 
+/** True when every radar tile URL for this view is already denoised. */
+export function viewRadarReady(view: View, layer: string): boolean {
+  let saw = false;
+  let ready = true;
+  forEachTileUrl(view, false, layer, (url, _x, _y, kind) => {
+    if (kind !== "radar") return;
+    saw = true;
+    if (!peekDenoisedRadar(url)) ready = false;
+  });
+  return saw && ready;
+}
+
+/** Fetch radar tiles for many layers at the current view (lookback grow). */
+export async function fetchRadarLayers(view: View, layers: string[]): Promise<void> {
+  const unique = [...new Set(layers)];
+  await Promise.all(unique.map((layer) => fetchViewTiles(view, false, layer)));
+}
+
 /** Warm neighbor integer zooms and the next loop frame without blocking paint. */
 export function prefetchAround(
   cssWidth: number,

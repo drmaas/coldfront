@@ -87,6 +87,8 @@ impl RadarSpeed {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RadarFrame {
     pub offset_minutes: u32,
+    /// Even-minute UTC instant for this frame (same floor as the archive layer stamp).
+    pub instant: Timestamp,
     pub layer: String,
     pub label: String,
 }
@@ -272,6 +274,20 @@ fn radar_interval_ms(base_ms: u32, speed: RadarSpeed) -> u32 {
     round_half_away_from_zero(interval).max(1) as u32
 }
 
+/// Even-minute UTC instant for a radar offset.
+///
+/// Matches the archive stamp floor used by [`radar_layer`]. Offset 0 uses the
+/// same floor of `now` even though the live layer is `q2-hsr`.
+#[must_use]
+pub fn radar_frame_instant(offset_minutes: u32, now: Timestamp) -> Timestamp {
+    let past = now
+        .checked_sub(i64::from(offset_minutes).minutes())
+        .unwrap_or(now);
+    let secs = past.as_second();
+    let floored = secs - secs.rem_euclid(120);
+    Timestamp::from_second(floored).unwrap_or(past)
+}
+
 /// IEM tile layer for one animation offset.
 ///
 /// Latest uses MRMS hybrid-scan reflectivity (`q2-hsr`), which drops most
@@ -282,16 +298,31 @@ pub fn radar_layer(offset_minutes: u32, now: Timestamp) -> String {
     if offset_minutes == 0 {
         return "q2-hsr-900913".to_string();
     }
-    let past = now
-        .checked_sub(i64::from(offset_minutes).minutes())
-        .unwrap_or(now);
-    let secs = past.as_second();
-    let floored = secs - secs.rem_euclid(120);
-    let stamp = Timestamp::from_second(floored)
-        .unwrap_or(past)
+    let stamp = radar_frame_instant(offset_minutes, now)
         .strftime("%Y%m%d%H%M")
         .to_string();
     format!("mrms::lcref-{stamp}")
+}
+
+/// `h:mm AM/PM` for a radar frame instant in an IANA zone.
+///
+/// Unknown or empty `time_zone` uses the system zone.
+#[must_use]
+pub fn format_radar_clock(instant: Timestamp, time_zone: Option<&str>) -> String {
+    let zone = time_zone
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .and_then(|name| jiff::tz::TimeZone::get(name).ok())
+        .unwrap_or_else(jiff::tz::TimeZone::system);
+    let zoned = instant.to_zoned(zone);
+    let hour24 = i32::from(zoned.hour());
+    let minute = zoned.minute();
+    let suffix = if hour24 >= 12 { "PM" } else { "AM" };
+    let hour12 = match hour24 % 12 {
+        0 => 12,
+        value => value,
+    };
+    format!("{hour12}:{minute:02} {suffix}")
 }
 
 #[must_use]
@@ -717,6 +748,7 @@ fn frame(offset_minutes: u32, now: Timestamp) -> RadarFrame {
     };
     RadarFrame {
         offset_minutes,
+        instant: radar_frame_instant(offset_minutes, now),
         layer: radar_layer(offset_minutes, now),
         label,
     }

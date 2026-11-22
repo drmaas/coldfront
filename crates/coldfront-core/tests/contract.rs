@@ -9,8 +9,8 @@ use coldfront_core::{
     OrthoFit, RadarLookback, RadarSpeed, RouteTarget, applet_radar_frames_at,
     applet_radar_frames_for, applet_radar_interval_ms, band_height, chart_points, day_label,
     describe, display_icon, display_temperature, display_wind_mph, fit_ortho_half_extents,
-    format_as_of, format_clock_time, hour_label, iem_tile_url, is_us_zip, is_zip_lookup,
-    lat_lon_to_tile, location_path, next_hours, parse_alerts, parse_geocode_search,
+    format_as_of, format_clock_time, format_radar_clock, hour_label, iem_tile_url, is_us_zip,
+    is_zip_lookup, lat_lon_to_tile, location_path, next_hours, parse_alerts, parse_geocode_search,
     parse_open_meteo, parse_route_path, parse_zippopotam, place_from_geocode_hit, range_placement,
     round_half_away_from_zero, tile_window, web_radar_frames_at, web_radar_frames_for,
     web_radar_interval_ms,
@@ -358,6 +358,14 @@ fn radar_tiles_and_frames_match_the_contract() {
         web[0].label,
         contract["web_first"]["label"].as_str().unwrap()
     );
+    assert_eq!(
+        web[0].instant.to_string(),
+        contract["web_first"]["instant"].as_str().unwrap()
+    );
+    assert_eq!(
+        format_radar_clock(web[0].instant, Some("America/Chicago")),
+        contract["web_first"]["clock_chicago"].as_str().unwrap()
+    );
     let last = web.last().unwrap();
     assert_eq!(
         last.offset_minutes,
@@ -365,6 +373,14 @@ fn radar_tiles_and_frames_match_the_contract() {
     );
     assert_eq!(last.layer, contract["web_last"]["layer"].as_str().unwrap());
     assert_eq!(last.label, contract["web_last"]["label"].as_str().unwrap());
+    assert_eq!(
+        last.instant.to_string(),
+        contract["web_last"]["instant"].as_str().unwrap()
+    );
+    assert_eq!(
+        format_radar_clock(last.instant, Some("America/Chicago")),
+        contract["web_last"]["clock_chicago"].as_str().unwrap()
+    );
 
     let applet = applet_radar_frames_at(now);
     assert_eq!(

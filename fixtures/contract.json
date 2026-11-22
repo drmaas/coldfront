@@ -108,13 +108,17 @@
   "web_frames": 12,
   "web_first": {
     "offset_minutes": 55,
+    "instant": "2026-11-20T04:14:00Z",
     "layer": "mrms::lcref-202611200414",
-    "label": "55 min ago"
+    "label": "55 min ago",
+    "clock_chicago": "10:14 PM"
   },
   "web_last": {
     "offset_minutes": 0,
+    "instant": "2026-11-20T05:10:00Z",
     "layer": "q2-hsr-900913",
-    "label": "Latest scan"
+    "label": "Latest scan",
+    "clock_chicago": "11:10 PM"
   },
   "applet_frames": 6,
   "applet_first_offset": 50,

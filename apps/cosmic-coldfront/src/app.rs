@@ -19,8 +19,8 @@ use coldfront_core::{
     RadarLookback, RadarSpeed, Raster, ReliefCamera, SnapshotTransform,
     applet_radar_frames_lookback, applet_radar_interval_ms, build_echo_field, clamp_relief_pitch,
     default_relief_camera, describe, display_icon, display_temperature, echo_grid,
-    geocode_query_allowed, is_us_zip, is_zip_lookup, place_from_geocode_hit, render_relief,
-    sample_echoes, snapshot_transform, symbolic_icon, zoom_toward,
+    format_radar_clock, geocode_query_allowed, is_us_zip, is_zip_lookup, place_from_geocode_hit,
+    render_relief, sample_echoes, snapshot_transform, symbolic_icon, zoom_toward,
 };
 
 const GEOCODE_SEARCH_DEBOUNCE: Duration = Duration::from_millis(300);
@@ -97,6 +97,8 @@ pub struct AppModel {
     pub(crate) playing: bool,
     pub(crate) radar_speed: RadarSpeed,
     pub(crate) radar_lookback: RadarLookback,
+    /// Frozen lookback list (instants match the tiles that were requested).
+    radar_frames: Vec<RadarFrame>,
     pub(crate) zoom: f64,
     pub(crate) pan_x: f64,
     pub(crate) pan_y: f64,
@@ -110,6 +112,7 @@ pub struct AppModel {
     gesturing: bool,
     pending_offsets: Vec<u32>,
     frames_ready: Vec<u32>,
+    lookback_batch_inflight: bool,
     drag: Option<DragState>,
     pointer: Option<Point>,
     map_hovered: bool,
@@ -235,6 +238,12 @@ pub enum Message {
         generation: u64,
         message: String,
     },
+    LookbackBatch {
+        generation: u64,
+        newly_ready: Vec<u32>,
+        attempted: Vec<u32>,
+        cache: Box<TileCache>,
+    },
     SelectForecastDay(usize),
 }
 
@@ -295,6 +304,7 @@ impl cosmic::Application for AppModel {
             playing: true,
             radar_speed: RadarSpeed::X1,
             radar_lookback: RadarLookback::Hours1,
+            radar_frames: applet_radar_frames_lookback(RadarLookback::Hours1),
             zoom: 7.0,
             pan_x: 0.0,
             pan_y: 0.0,
@@ -307,6 +317,7 @@ impl cosmic::Application for AppModel {
             gesturing: false,
             pending_offsets: Vec::new(),
             frames_ready: Vec::new(),
+            lookback_batch_inflight: false,
             drag: None,
             pointer: None,
             map_hovered: false,
@@ -570,6 +581,7 @@ impl cosmic::Application for AppModel {
             }
             Message::CycleRadarLookback => {
                 self.radar_lookback = self.radar_lookback.next();
+                self.rebuild_radar_frames();
                 return self.apply_lookback_change();
             }
             Message::FrameSlider(index) => {
@@ -808,6 +820,31 @@ impl cosmic::Application for AppModel {
                     if self.map_handle.is_none() {
                         self.map_error = Some(message);
                     }
+                }
+            }
+            Message::LookbackBatch {
+                generation,
+                newly_ready,
+                attempted,
+                cache,
+            } => {
+                self.tile_cache.absorb(&cache);
+                // Always clear so a bumped map_generation cannot leave fetch stuck.
+                self.lookback_batch_inflight = false;
+                if generation != self.map_generation {
+                    return Task::none();
+                }
+                for offset in attempted {
+                    self.finish_pending(offset);
+                }
+                for offset in newly_ready {
+                    if !self.frames_ready.contains(&offset) {
+                        self.frames_ready.push(offset);
+                    }
+                }
+                self.frames_ready.sort_unstable();
+                if !self.gesturing {
+                    let _ = self.recompose_current();
                 }
             }
             Message::SelectForecastDay(index) => {
@@ -1080,6 +1117,7 @@ impl AppModel {
         self.map_handle = None;
         self.frames_ready.clear();
         self.pending_offsets.clear();
+        self.lookback_batch_inflight = false;
         self.radar_tiles = 0;
         self.pan_x = 0.0;
         self.pan_y = 0.0;
@@ -1097,6 +1135,11 @@ impl AppModel {
         self.relief_field = None;
         self.relief_empty = false;
         self.relief_camera = default_relief_camera(MAP_VIEW_WIDTH, MAP_VIEW_HEIGHT);
+        self.rebuild_radar_frames();
+    }
+
+    fn rebuild_radar_frames(&mut self) {
+        self.radar_frames = applet_radar_frames_lookback(self.radar_lookback);
     }
 
     fn reload_map(&mut self, clear_cache: bool) -> Task<cosmic::Action<Message>> {
@@ -1105,6 +1148,8 @@ impl AppModel {
         };
         self.map_generation = self.map_generation.wrapping_add(1);
         let generation = self.map_generation;
+        self.lookback_batch_inflight = false;
+        self.rebuild_radar_frames();
         if clear_cache {
             self.tile_cache.clear();
             self.frames_ready.clear();
@@ -1123,7 +1168,7 @@ impl AppModel {
         let (view_width, view_height) = self.map_size();
         let pixel_ratio = self.pixel_ratio;
         let shown_offset = self.shown_offset;
-        let lookback = self.radar_lookback;
+        let frames = self.radar_frames.clone();
         let mut cache = self.tile_cache.clone();
         cosmic::task::future(async move {
             let client = match HttpClient::new() {
@@ -1135,7 +1180,6 @@ impl AppModel {
                     };
                 }
             };
-            let frames = applet_radar_frames_lookback(lookback);
             let latest = frames.last().map(|frame| frame.offset_minutes).unwrap_or(0);
             let first_offset = if frames
                 .iter()
@@ -1156,7 +1200,7 @@ impl AppModel {
                 pixel_ratio,
                 offset_minutes: first_offset,
             };
-            match mapload::ensure_map_frame(&client, &mut cache, &kind, &request).await {
+            match mapload::ensure_map_frame(&client, &mut cache, &kind, &request, &frames).await {
                 Ok(frame) => {
                     let mut pending: Vec<u32> = frames
                         .iter()
@@ -1203,6 +1247,7 @@ impl AppModel {
         let pan_y = self.pan_y;
         let (view_width, view_height) = self.map_size();
         let pixel_ratio = self.pixel_ratio;
+        let frames = self.radar_frames.clone();
         let mut cache = self.tile_cache.clone();
         cosmic::task::future(async move {
             let client = match HttpClient::new() {
@@ -1225,7 +1270,7 @@ impl AppModel {
                 pixel_ratio,
                 offset_minutes: offset,
             };
-            match mapload::ensure_map_frame(&client, &mut cache, &kind, &request).await {
+            match mapload::ensure_map_frame(&client, &mut cache, &kind, &request, &frames).await {
                 Ok(frame) => Message::OlderFrame {
                     generation,
                     zoom,
@@ -1260,11 +1305,11 @@ impl AppModel {
 
     /// Present a settled frame when the camera still matches. Returns true when shown.
     fn apply_frame(&mut self, frame: LoadedFrame, zoom: f64, pan_x: f64, pan_y: f64) -> bool {
-        if !self.frames_ready.contains(&frame.offset_minutes) {
+        if frame.radar_tiles > 0 && !self.frames_ready.contains(&frame.offset_minutes) {
             self.frames_ready.push(frame.offset_minutes);
             self.frames_ready.sort_unstable();
         }
-        if self.frames_ready.len() == 1 {
+        if self.frames_ready.len() == 1 && frame.radar_tiles > 0 {
             self.shown_offset = frame.offset_minutes;
         }
         if !self.camera_matches(zoom, pan_x, pan_y) {
@@ -1451,6 +1496,7 @@ impl AppModel {
         };
         self.map_generation = self.map_generation.wrapping_add(1);
         let generation = self.map_generation;
+        self.lookback_batch_inflight = false;
         self.map_error = None;
         let kind = basemap_kind(&self.config);
         let zoom = self.zoom;
@@ -1459,6 +1505,7 @@ impl AppModel {
         let (view_width, view_height) = self.map_size();
         let pixel_ratio = self.pixel_ratio;
         let shown_offset = self.shown_offset;
+        let frames = self.radar_frames.clone();
         let extra_offsets: Vec<u32> = self
             .frames_ready
             .iter()
@@ -1467,8 +1514,8 @@ impl AppModel {
             .collect();
         // Same order as reload_map: `.last()` loads next, so reverse chrono.
         let pending: Vec<u32> = self
-            .radar_frames()
-            .into_iter()
+            .radar_frames
+            .iter()
             .rev()
             .map(|frame| frame.offset_minutes)
             .filter(|offset| !self.frames_ready.contains(offset) && *offset != shown_offset)
@@ -1495,8 +1542,15 @@ impl AppModel {
                 pixel_ratio,
                 offset_minutes: shown_offset,
             };
-            match mapload::ensure_map_frames(&client, &mut cache, &kind, &request, &extra_offsets)
-                .await
+            match mapload::ensure_map_frames(
+                &client,
+                &mut cache,
+                &kind,
+                &request,
+                &extra_offsets,
+                &frames,
+            )
+            .await
             {
                 Ok(frame) => Message::MapReady {
                     generation,
@@ -1516,33 +1570,40 @@ impl AppModel {
     }
 
     fn advance_radar(&mut self) -> Task<cosmic::Action<Message>> {
-        let sequence: Vec<u32> = self
-            .radar_frames()
-            .into_iter()
-            .map(|frame| frame.offset_minutes)
-            .filter(|offset| self.frames_ready.contains(offset))
-            .collect();
-        if sequence.len() < 2 {
-            return Task::none();
-        }
-        let index = sequence
+        let full: Vec<u32> = self
+            .radar_frames
             .iter()
-            .position(|offset| *offset == self.shown_offset)
-            .unwrap_or(0);
-        let next = (index + 1) % sequence.len();
-        let next_offset = sequence[next];
-        let (next_shown, deferred) =
-            playback_advance_during_gesture(self.gesturing, self.shown_offset, next_offset);
-        if let Some(offset) = deferred {
-            self.deferred_shown_offset = Some(offset);
-            return self.schedule_settle();
+            .map(|frame| frame.offset_minutes)
+            .collect();
+        let ready: std::collections::HashSet<u32> = self.frames_ready.iter().copied().collect();
+        let pending: std::collections::HashSet<u32> =
+            self.pending_offsets.iter().copied().collect();
+        match next_playback_step(&full, &ready, &pending, self.shown_offset) {
+            PlaybackStep::Wait => {
+                if !self.pending_offsets.is_empty() && !self.lookback_batch_inflight {
+                    return self.load_lookback_batch();
+                }
+                Task::none()
+            }
+            PlaybackStep::Stay => Task::none(),
+            PlaybackStep::Advance(next_offset) => {
+                let (next_shown, deferred) =
+                    playback_advance_during_gesture(self.gesturing, self.shown_offset, next_offset);
+                if let Some(offset) = deferred {
+                    self.deferred_shown_offset = Some(offset);
+                    return self.schedule_settle();
+                }
+                self.shown_offset = next_shown;
+                // Cache-only paint. settle_now bumps map_generation and cancels in-flight
+                // fullscreen refreshes, which freezes playback on large maps.
+                self.gesturing = false;
+                if self.recompose_current() {
+                    return Task::none();
+                }
+                // No tiles at this camera yet (pan/zoom before lookback settle).
+                self.schedule_settle()
+            }
         }
-        self.shown_offset = next_shown;
-        // Cache-only paint. settle_now bumps map_generation and cancels in-flight
-        // fullscreen refreshes, which freezes playback on large maps.
-        self.gesturing = false;
-        let _ = self.recompose_current();
-        Task::none()
     }
 
     fn apply_deferred_shown_offset(&mut self) {
@@ -1672,22 +1733,20 @@ impl AppModel {
         let (view_width, view_height) = self.map_size();
         let pixel_ratio = self.pixel_ratio;
         let shown_offset = self.shown_offset;
-        let sequence: Vec<u32> = self
-            .radar_frames()
-            .into_iter()
+        let full: Vec<u32> = self
+            .radar_frames
+            .iter()
             .map(|frame| frame.offset_minutes)
-            .filter(|offset| self.frames_ready.contains(offset))
             .collect();
-        let next_offset = if sequence.len() >= 2 {
-            let index = sequence
-                .iter()
-                .position(|offset| *offset == shown_offset)
-                .unwrap_or(0);
-            Some(sequence[(index + 1) % sequence.len()])
-        } else {
-            None
+        let ready: std::collections::HashSet<u32> = self.frames_ready.iter().copied().collect();
+        let pending: std::collections::HashSet<u32> =
+            self.pending_offsets.iter().copied().collect();
+        let next_offset = match next_playback_step(&full, &ready, &pending, shown_offset) {
+            PlaybackStep::Advance(offset) => Some(offset),
+            PlaybackStep::Wait | PlaybackStep::Stay => None,
         };
         let generation = self.map_generation;
+        let frames = self.radar_frames.clone();
         let mut cache = self.tile_cache.clone();
         cosmic::task::future(async move {
             let Ok(client) = HttpClient::new() else {
@@ -1707,7 +1766,8 @@ impl AppModel {
                 pixel_ratio,
                 offset_minutes: shown_offset,
             };
-            mapload::prefetch_around(&client, &mut cache, &kind, &request, next_offset).await;
+            mapload::prefetch_around(&client, &mut cache, &kind, &request, &frames, next_offset)
+                .await;
             Message::PrefetchDone {
                 generation,
                 cache: Box::new(cache),
@@ -1776,14 +1836,14 @@ impl AppModel {
     }
 
     pub(crate) fn frame_index(&self) -> u32 {
-        self.radar_frames()
+        self.radar_frames
             .iter()
             .position(|frame| frame.offset_minutes == self.shown_offset)
             .unwrap_or(0) as u32
     }
 
     pub(crate) fn frame_count(&self) -> u32 {
-        self.radar_frames().len().saturating_sub(1) as u32
+        self.radar_frames.len().saturating_sub(1) as u32
     }
 
     pub(crate) fn radar_speed_label(&self) -> String {
@@ -1794,12 +1854,8 @@ impl AppModel {
         format!("{}h", self.radar_lookback.hours())
     }
 
-    fn radar_frames(&self) -> Vec<RadarFrame> {
-        applet_radar_frames_lookback(self.radar_lookback)
-    }
-
     fn frame_offset_at(&self, index: usize) -> Option<u32> {
-        self.radar_frames()
+        self.radar_frames
             .get(index)
             .map(|frame| frame.offset_minutes)
     }
@@ -1807,8 +1863,8 @@ impl AppModel {
     /// Grow or shrink the playback list without clearing the tile cache.
     fn apply_lookback_change(&mut self) -> Task<cosmic::Action<Message>> {
         let allowed: Vec<u32> = self
-            .radar_frames()
-            .into_iter()
+            .radar_frames
+            .iter()
             .map(|frame| frame.offset_minutes)
             .collect();
         let (pending, ready, shown) = merge_lookback_offsets(
@@ -1833,11 +1889,105 @@ impl AppModel {
         if self.pending_offsets.is_empty() {
             return Task::none();
         }
-        self.load_next_frame()
+        self.load_lookback_batch()
+    }
+
+    /// Fetch every pending lookback offset at the current camera in one pass.
+    fn load_lookback_batch(&mut self) -> Task<cosmic::Action<Message>> {
+        if self.pending_offsets.is_empty() || self.lookback_batch_inflight {
+            return Task::none();
+        }
+        let Some(place) = self.place.clone() else {
+            return Task::none();
+        };
+        self.lookback_batch_inflight = true;
+        let generation = self.map_generation;
+        let kind = basemap_kind(&self.config);
+        let zoom = self.zoom;
+        let pan_x = self.pan_x;
+        let pan_y = self.pan_y;
+        let (view_width, view_height) = self.map_size();
+        let pixel_ratio = self.pixel_ratio;
+        let shown_offset = self.shown_offset;
+        let frames = self.radar_frames.clone();
+        let attempted = self.pending_offsets.clone();
+        let mut cache = self.tile_cache.clone();
+        cosmic::task::future(async move {
+            let Ok(client) = HttpClient::new() else {
+                return Message::LookbackBatch {
+                    generation,
+                    newly_ready: Vec::new(),
+                    attempted,
+                    cache: Box::new(cache),
+                };
+            };
+            let request = mapload::MapRequest {
+                latitude: place.latitude,
+                longitude: place.longitude,
+                zoom,
+                pan_x,
+                pan_y,
+                view_width,
+                view_height,
+                pixel_ratio,
+                offset_minutes: shown_offset,
+            };
+            let _ = mapload::ensure_map_frames(
+                &client, &mut cache, &kind, &request, &attempted, &frames,
+            )
+            .await;
+            let (viewport, frac_scale) = mapload::viewport_for(
+                place.latitude,
+                place.longitude,
+                zoom,
+                pan_x,
+                pan_y,
+                view_width,
+                view_height,
+            );
+            let present = mapload::PresentScale {
+                frac_scale,
+                view_width,
+                view_height,
+                pixel_ratio,
+            };
+            let mut newly_ready = Vec::new();
+            for offset in &attempted {
+                if let Ok(frame) =
+                    mapload::compose_cached(&cache, &kind, &viewport, present, *offset)
+                    && frame.radar_tiles > 0
+                {
+                    newly_ready.push(*offset);
+                }
+            }
+            Message::LookbackBatch {
+                generation,
+                newly_ready,
+                attempted,
+                cache: Box::new(cache),
+            }
+        })
     }
 
     pub(crate) fn current_frame_label(&self) -> String {
         frame_label(self.shown_offset)
+    }
+
+    pub(crate) fn current_frame_clock(&self) -> String {
+        let instant = self
+            .radar_frames
+            .iter()
+            .find(|frame| frame.offset_minutes == self.shown_offset)
+            .or_else(|| self.radar_frames.last())
+            .map(|frame| frame.instant);
+        let Some(instant) = instant else {
+            return String::new();
+        };
+        let zone = self
+            .forecast
+            .as_ref()
+            .map(|forecast| forecast.timezone.as_str());
+        format_radar_clock(instant, zone)
     }
 
     pub(crate) fn map_size(&self) -> (u32, u32) {
@@ -2012,13 +2162,48 @@ pub(crate) fn playback_advance_during_gesture(
     }
 }
 
+/// Next loop step over the full lookback list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlaybackStep {
+    Advance(u32),
+    Wait,
+    Stay,
+}
+
+/// Advance onto the next ready offset. Wait while the next is still pending.
+/// Skip permanently failed offsets (neither ready nor pending).
+pub(crate) fn next_playback_step(
+    full: &[u32],
+    ready: &std::collections::HashSet<u32>,
+    pending: &std::collections::HashSet<u32>,
+    shown_offset: u32,
+) -> PlaybackStep {
+    if full.len() < 2 {
+        return PlaybackStep::Stay;
+    }
+    let start = full
+        .iter()
+        .position(|offset| *offset == shown_offset)
+        .unwrap_or(0);
+    for step in 1..full.len() {
+        let offset = full[(start + step) % full.len()];
+        if ready.contains(&offset) {
+            return PlaybackStep::Advance(offset);
+        }
+        if pending.contains(&offset) {
+            return PlaybackStep::Wait;
+        }
+    }
+    PlaybackStep::Stay
+}
+
 #[cfg(test)]
 mod tests {
     use coldfront_core::{RadarSpeed, applet_radar_interval_ms};
 
     use super::{
-        format_panel_temperature, merge_lookback_offsets, playback_advance_during_gesture,
-        prefetch_absorb_allowed,
+        PlaybackStep, format_panel_temperature, merge_lookback_offsets, next_playback_step,
+        playback_advance_during_gesture, prefetch_absorb_allowed,
     };
 
     #[test]
@@ -2078,5 +2263,38 @@ mod tests {
         assert!(!next_pending.contains(&60));
         assert!(!next_pending.contains(&180));
         assert!(!next_pending.contains(&0));
+    }
+
+    #[test]
+    fn playback_waits_on_pending_next_offset() {
+        let full = [50, 40, 30, 20, 10, 0];
+        let ready = std::collections::HashSet::from([0, 50]);
+        let pending = std::collections::HashSet::from([40]);
+        assert_eq!(
+            next_playback_step(&full, &ready, &pending, 50),
+            PlaybackStep::Wait
+        );
+    }
+
+    #[test]
+    fn playback_skips_failed_offset_to_next_ready() {
+        let full = [50, 40, 30, 20, 10, 0];
+        let ready = std::collections::HashSet::from([0, 50, 30]);
+        let pending = std::collections::HashSet::new();
+        assert_eq!(
+            next_playback_step(&full, &ready, &pending, 50),
+            PlaybackStep::Advance(30)
+        );
+    }
+
+    #[test]
+    fn playback_advances_when_next_is_ready() {
+        let full = [50, 40, 30, 20, 10, 0];
+        let ready = std::collections::HashSet::from([0, 50, 40]);
+        let pending = std::collections::HashSet::new();
+        assert_eq!(
+            next_playback_step(&full, &ready, &pending, 50),
+            PlaybackStep::Advance(40)
+        );
     }
 }

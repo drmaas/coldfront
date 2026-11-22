@@ -70,6 +70,8 @@ export interface WeatherInfo {
 
 export interface RadarFrame {
   offsetMinutes: number;
+  /** Even-minute UTC instant in milliseconds (same floor as the archive layer stamp). */
+  instantMs: number;
   layer: string;
   label: string;
 }
@@ -462,6 +464,29 @@ export function nextRadarSpeed(speed: RadarSpeed): RadarSpeed {
   return 1;
 }
 
+/** Next loop step: advance only onto a ready offset; wait while the next is still fetching. */
+export type PlaybackStep =
+  | { kind: "advance"; offsetMinutes: number }
+  | { kind: "wait" }
+  | { kind: "stay" };
+
+export function nextPlaybackStep(
+  full: readonly number[],
+  ready: ReadonlySet<number>,
+  pending: ReadonlySet<number>,
+  shownOffset: number,
+): PlaybackStep {
+  if (full.length < 2) return { kind: "stay" };
+  const start = full.indexOf(shownOffset);
+  const from = start >= 0 ? start : 0;
+  for (let step = 1; step < full.length; step += 1) {
+    const offset = full[(from + step) % full.length];
+    if (ready.has(offset)) return { kind: "advance", offsetMinutes: offset };
+    if (pending.has(offset)) return { kind: "wait" };
+  }
+  return { kind: "stay" };
+}
+
 export function webRadarFrames(now: Date = new Date()): RadarFrame[] {
   return webRadarFramesFor(1, now);
 }
@@ -514,18 +539,44 @@ function radarIntervalMs(baseMs: number, speed: RadarSpeed): number {
   return Math.max(1, roundHalfAwayFromZero(baseMs / speed));
 }
 
+/** Even-minute UTC instant (ms) for a radar offset. See Rust `radar_frame_instant`. */
+export function radarFrameInstantMs(offsetMinutes: number, now: Date = new Date()): number {
+  const ms = now.getTime() - offsetMinutes * 60_000;
+  return ms - (((ms % 120_000) + 120_000) % 120_000);
+}
+
 /** IEM tile layer for one animation offset. See Rust `radar_layer`. */
 export function radarLayer(offsetMinutes: number, now: Date = new Date()): string {
   if (offsetMinutes === 0) return "q2-hsr-900913";
-  const ms = now.getTime() - offsetMinutes * 60_000;
-  const floored = ms - (((ms % 120_000) + 120_000) % 120_000);
-  const stamp = new Date(floored);
+  const stamp = new Date(radarFrameInstantMs(offsetMinutes, now));
   const y = stamp.getUTCFullYear();
   const month = String(stamp.getUTCMonth() + 1).padStart(2, "0");
   const day = String(stamp.getUTCDate()).padStart(2, "0");
   const hour = String(stamp.getUTCHours()).padStart(2, "0");
   const minute = String(stamp.getUTCMinutes()).padStart(2, "0");
   return `mrms::lcref-${y}${month}${day}${hour}${minute}`;
+}
+
+/** `h:mm AM/PM` for a radar frame instant. Empty/unknown zone uses the runtime default. */
+export function formatRadarClock(instantMs: number, timeZone?: string | null): string {
+  const options: Intl.DateTimeFormatOptions = {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  };
+  const zone = timeZone?.trim();
+  if (zone) options.timeZone = zone;
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", options).formatToParts(new Date(instantMs));
+    const hour = parts.find((part) => part.type === "hour")?.value;
+    const minute = parts.find((part) => part.type === "minute")?.value;
+    const dayPeriod = parts.find((part) => part.type === "dayPeriod")?.value;
+    if (hour && minute && dayPeriod) return `${hour}:${minute} ${dayPeriod}`;
+  } catch {
+    // Invalid IANA zone — fall through to the runtime default.
+  }
+  if (zone) return formatRadarClock(instantMs, null);
+  return new Intl.DateTimeFormat("en-US", options).format(new Date(instantMs));
 }
 
 export function iemTileUrl(layer: string, zoom: number, x: number, y: number): string {
@@ -603,6 +654,7 @@ export function rangePlacement(
 function radarFrame(offsetMinutes: number, now: Date): RadarFrame {
   return {
     offsetMinutes,
+    instantMs: radarFrameInstantMs(offsetMinutes, now),
     layer: radarLayer(offsetMinutes, now),
     label: offsetMinutes === 0 ? "Latest scan" : `${offsetMinutes} min ago`,
   };

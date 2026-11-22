@@ -268,19 +268,24 @@ pub async fn ensure_map_frame(
     cache: &mut TileCache,
     kind: &BasemapKind,
     request: &MapRequest,
+    frozen_frames: &[RadarFrame],
 ) -> Result<LoadedFrame, Error> {
-    ensure_map_frames(client, cache, kind, request, &[]).await
+    ensure_map_frames(client, cache, kind, request, &[], frozen_frames).await
 }
 
 /// Fetch tiles for `request` plus any extra radar offsets at the same camera,
 /// then compose the shown frame. Extra offsets fill the cache for playback
 /// after pan/zoom without restarting the whole load pipeline.
+///
+/// `frozen_frames` pins IEM layer stamps to the playback list built at lookback
+/// change time so a late fetch does not roll onto a newer even minute.
 pub async fn ensure_map_frames(
     client: &HttpClient,
     cache: &mut TileCache,
     kind: &BasemapKind,
     request: &MapRequest,
     extra_offsets: &[u32],
+    frozen_frames: &[RadarFrame],
 ) -> Result<LoadedFrame, Error> {
     let (viewport, scale) = viewport_for(
         request.latitude,
@@ -291,13 +296,13 @@ pub async fn ensure_map_frames(
         request.view_width,
         request.view_height,
     );
-    let primary = radar_frame_at(request.offset_minutes);
+    let primary = resolve_frame(request.offset_minutes, frozen_frames);
     fill_viewport_tiles(client, cache, kind, &viewport, &primary).await;
     for offset in extra_offsets {
         if *offset == request.offset_minutes {
             continue;
         }
-        let frame = radar_frame_at(*offset);
+        let frame = resolve_frame(*offset, frozen_frames);
         fill_viewport_tiles(client, cache, kind, &viewport, &frame).await;
     }
     compose_cached(
@@ -323,6 +328,7 @@ pub async fn prefetch_around(
     cache: &mut TileCache,
     kind: &BasemapKind,
     request: &MapRequest,
+    frozen_frames: &[RadarFrame],
     next_offset: Option<u32>,
 ) {
     let floor = request.zoom.floor() as u32;
@@ -336,7 +342,7 @@ pub async fn prefetch_around(
             request.view_width,
             request.view_height,
         );
-        (viewport, radar_frame_at(offset))
+        (viewport, resolve_frame(offset, frozen_frames))
     };
     if floor > coldfront_core::APPLET_ZOOM_MIN {
         let (viewport, frame) = warm(f64::from(floor - 1), request.offset_minutes);
@@ -352,6 +358,14 @@ pub async fn prefetch_around(
         let (viewport, frame) = warm(request.zoom, offset);
         fill_viewport_tiles(client, cache, kind, &viewport, &frame).await;
     }
+}
+
+fn resolve_frame(offset_minutes: u32, frozen_frames: &[RadarFrame]) -> RadarFrame {
+    frozen_frames
+        .iter()
+        .find(|frame| frame.offset_minutes == offset_minutes)
+        .cloned()
+        .unwrap_or_else(|| radar_frame_at(offset_minutes))
 }
 
 /// Recompose from cache for the current camera.

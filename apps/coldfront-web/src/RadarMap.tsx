@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  formatRadarClock,
+  nextPlaybackStep,
   nextRadarLookback,
   nextRadarSpeed,
   webRadarFramesFor,
@@ -35,9 +37,11 @@ import {
 } from "./radarRelief";
 import { pinCssAt } from "./radarPin";
 import {
+  fetchRadarLayers,
   fetchViewTiles,
   placeCachedTiles,
   prefetchAround,
+  viewRadarReady,
   type PlacedTile,
 } from "./radarTiles";
 
@@ -45,6 +49,7 @@ interface RadarMapProps {
   latitude: number;
   longitude: number;
   basemap: "maptiler" | "none";
+  timeZone?: string | null;
 }
 
 const SETTLE_MS = 50;
@@ -60,7 +65,7 @@ interface Snapshot {
   pinCssY: number;
 }
 
-export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
+export function RadarMap({ latitude, longitude, basemap, timeZone }: RadarMapProps) {
   const cardRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -71,12 +76,14 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
   const frames = useMemo(() => webRadarFramesFor(lookback), [lookback]);
   const [index, setIndex] = useState(() => webRadarFramesFor(1).length - 1);
   const [playing, setPlaying] = useState(true);
+  const [, setReadyTick] = useState(0);
   const [zoom, setZoom] = useState(6);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [sizeTick, setSizeTick] = useState(0);
+  const [lookbackKick, setLookbackKick] = useState(0);
   const [mode, setMode] = useState<RadarMode>("flat");
   const [echoes, setEchoes] = useState<EchoSample[]>([]);
   const [echoCols, setEchoCols] = useState(200);
@@ -88,6 +95,10 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
   const modeRef = useRef(mode);
   const shownOffsetRef = useRef(0);
   const lookbackForIndexRef = useRef(lookback);
+  const readyOffsetsRef = useRef(new Set<number>());
+  const pendingOffsetsRef = useRef(new Set<number>());
+  const lookbackFetchGen = useRef(0);
+  const lookbackFetchInflight = useRef(false);
   const wheelRaf = useRef(0);
   const blitRaf = useRef(0);
   const settleTimer = useRef(0);
@@ -108,6 +119,7 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
   const frame = frames[index] ?? frames[frames.length - 1];
   const nextFrame = frames[(index + 1) % frames.length] ?? frame;
   const oldestLabel = frames[0]?.label ?? "55 min ago";
+  const clockLabel = formatRadarClock(frame.instantMs, timeZone);
   const intervalMs = webRadarIntervalMs(speed);
   const withBasemap = basemap === "maptiler";
   const relief = mode === "relief" && glOk;
@@ -116,6 +128,7 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
     longitude,
     withBasemap,
     layer: frame.layer,
+    offsetMinutes: frame.offsetMinutes,
     nextLayer: nextFrame.layer,
     glOk,
   });
@@ -136,6 +149,7 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
     longitude,
     withBasemap,
     layer: frame.layer,
+    offsetMinutes: frame.offsetMinutes,
     nextLayer: nextFrame.layer,
     glOk,
   };
@@ -402,12 +416,17 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
     if (result.drewRadar) {
       setReady(true);
       setFailed(false);
+      readyOffsetsRef.current.add(args.offsetMinutes);
+      pendingOffsetsRef.current.delete(args.offsetMinutes);
+      setReadyTick((tick) => tick + 1);
     } else if (!hadSnapshot) {
       setFailed(true);
       if (wantRelief) {
         setEchoes([]);
         setGround(null);
       }
+    } else {
+      pendingOffsetsRef.current.delete(args.offsetMinutes);
     }
 
     prefetchAround(
@@ -462,6 +481,10 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
     reliefSceneRef.current = null;
     snapshotRef.current = null;
     boardTransformRef.current = { scale: 1, tx: 0, ty: 0 };
+    readyOffsetsRef.current.clear();
+    pendingOffsetsRef.current.clear();
+    lookbackFetchGen.current += 1;
+    lookbackFetchInflight.current = false;
   }, [latitude, longitude, basemap]);
 
   useEffect(() => {
@@ -473,19 +496,105 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
   }, [mode, pan, zoom, ready, sizeTick]);
 
   useEffect(() => {
-    if (lookbackForIndexRef.current === lookback) return;
-    lookbackForIndexRef.current = lookback;
-    const nextIndex = frames.findIndex((item) => item.offsetMinutes === shownOffsetRef.current);
-    setIndex(nextIndex >= 0 ? nextIndex : frames.length - 1);
-  }, [lookback, frames]);
+    const allowed = new Set(frames.map((item) => item.offsetMinutes));
+    for (const offset of [...readyOffsetsRef.current]) {
+      if (!allowed.has(offset)) readyOffsetsRef.current.delete(offset);
+    }
+    for (const offset of [...pendingOffsetsRef.current]) {
+      if (!allowed.has(offset)) pendingOffsetsRef.current.delete(offset);
+    }
+    if (lookbackForIndexRef.current !== lookback) {
+      lookbackForIndexRef.current = lookback;
+      const nextIndex = frames.findIndex((item) => item.offsetMinutes === shownOffsetRef.current);
+      setIndex(nextIndex >= 0 ? nextIndex : frames.length - 1);
+    }
+    const stage = stageRef.current;
+    if (!stage) return undefined;
+    const view = readView(
+      stage.clientWidth,
+      stage.clientHeight,
+      latitude,
+      longitude,
+      zoomRef.current,
+      panRef.current,
+      window.devicePixelRatio || 1,
+    );
+    if (!view) return undefined;
+    const missing = frames.filter((item) => {
+      if (readyOffsetsRef.current.has(item.offsetMinutes)) return false;
+      if (viewRadarReady(view, item.layer)) {
+        readyOffsetsRef.current.add(item.offsetMinutes);
+        pendingOffsetsRef.current.delete(item.offsetMinutes);
+        return false;
+      }
+      return true;
+    });
+    if (missing.length === 0) {
+      setReadyTick((tick) => tick + 1);
+      return undefined;
+    }
+    for (const item of missing) pendingOffsetsRef.current.add(item.offsetMinutes);
+    const gen = ++lookbackFetchGen.current;
+    lookbackFetchInflight.current = true;
+    void fetchRadarLayers(
+      view,
+      missing.map((item) => item.layer),
+    ).then(() => {
+      if (gen !== lookbackFetchGen.current) return;
+      lookbackFetchInflight.current = false;
+      // Re-read camera: pan/zoom/resize may have moved while tiles downloaded.
+      const liveStage = stageRef.current;
+      const liveView = liveStage
+        ? readView(
+            liveStage.clientWidth,
+            liveStage.clientHeight,
+            latitude,
+            longitude,
+            zoomRef.current,
+            panRef.current,
+            window.devicePixelRatio || 1,
+          )
+        : null;
+      const check = liveView ?? view;
+      for (const item of missing) {
+        if (viewRadarReady(check, item.layer)) {
+          readyOffsetsRef.current.add(item.offsetMinutes);
+          pendingOffsetsRef.current.delete(item.offsetMinutes);
+        }
+        // else leave in pending so Wait can kick another pass at the live camera
+      }
+      setReadyTick((tick) => tick + 1);
+    });
+    return undefined;
+  }, [lookback, frames, latitude, longitude, basemap, sizeTick, lookbackKick]);
 
   useEffect(() => {
     if (!playing) return undefined;
+    const offsets = frames.map((item) => item.offsetMinutes);
     const timer = window.setInterval(() => {
-      setIndex((current) => (current + 1) % frames.length);
+      let kickLookback = false;
+      setIndex((current) => {
+        const shown = frames[current]?.offsetMinutes ?? offsets[offsets.length - 1] ?? 0;
+        const step = nextPlaybackStep(
+          offsets,
+          readyOffsetsRef.current,
+          pendingOffsetsRef.current,
+          shown,
+        );
+        if (step.kind === "wait") {
+          if (pendingOffsetsRef.current.size > 0 && !lookbackFetchInflight.current) {
+            kickLookback = true;
+          }
+          return current;
+        }
+        if (step.kind !== "advance") return current;
+        const next = frames.findIndex((item) => item.offsetMinutes === step.offsetMinutes);
+        return next >= 0 ? next : current;
+      });
+      if (kickLookback) setLookbackKick((kick) => kick + 1);
     }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [playing, frames.length, intervalMs]);
+  }, [playing, frames, intervalMs]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -905,6 +1014,9 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
             />
             <circle cx="0" cy="-13" r="3.2" fill="#fff" />
           </svg>
+        </div>
+        <div className="radar-clock" aria-live="polite">
+          {clockLabel}
         </div>
         <div className="zoom-controls">
           {glOk && (

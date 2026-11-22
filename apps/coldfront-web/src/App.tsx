@@ -297,7 +297,12 @@ function ForecastBody({ data, units }: { data: ForecastData; units: Units }) {
           })}
         </ol>
       </section>
-      <RadarMap latitude={place.latitude} longitude={place.longitude} basemap={data.basemap} />
+      <RadarMap
+        latitude={place.latitude}
+        longitude={place.longitude}
+        basemap={data.basemap}
+        timeZone={data.forecast.timezone}
+      />
     </div>
   );
 }

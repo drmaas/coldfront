@@ -3,9 +3,22 @@ name: Release Arch package
 on:
   push:
     tags: ["v*"]
+    branches: [main]
+    paths:
+      - apps/cosmic-coldfront/**
+      - crates/**
+      - Cargo.toml
+      - Cargo.lock
+      - arch/**
+      - .github/workflows/release-arch.yml
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-arch-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 jobs:
   build-arch:
@@ -23,18 +36,45 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Record the Rust toolchain version
+        id: rustc
+        run: echo "version=$(rustc -V | tr ' ' '-')" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure Cargo cache parent directories exist
+        run: mkdir -p .cargo-cache/cargo-home .cargo-cache/target
+
+      - name: Restore the Cargo cache
+        uses: actions/cache@v4
+        id: cargo-cache
+        with:
+          path: |
+            .cargo-cache/cargo-home/registry/index
+            .cargo-cache/cargo-home/registry/cache
+            .cargo-cache/cargo-home/git/db
+            .cargo-cache/target
+          key: arch-release-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-${{ steps.rustc.outputs.version }}
+          restore-keys: |
+            arch-release-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-
+            arch-release-${{ runner.os }}-
+
       - name: Check the versions agree
+        if: github.ref_type == 'tag'
         run: scripts/check-version.sh "$GITHUB_REF_NAME"
 
       - name: Build the package
+        env:
+          CARGO_HOME: ${{ github.workspace }}/.cargo-cache/cargo-home
+          CARGO_TARGET_DIR: ${{ github.workspace }}/.cargo-cache/target
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           pkgver=$(sed -n 's/^pkgver=//p' arch/PKGBUILD)
           git archive --prefix="coldfront-$pkgver/" \
             -o arch/"coldfront-$pkgver.tar.gz" HEAD
           useradd -m builder
-          chown -R builder arch
-          su builder -c 'cd arch && makepkg --noconfirm'
+          mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR"
+          chown -R builder:builder "$GITHUB_WORKSPACE/.cargo-cache"
+          su builder -c "export CARGO_HOME='$CARGO_HOME' CARGO_TARGET_DIR='$CARGO_TARGET_DIR' CARGO_INCREMENTAL=0; cd arch && makepkg --noconfirm --nocheck"
+          chown -R root:root "$GITHUB_WORKSPACE/.cargo-cache"
           mkdir -p dist
           cp arch/*.pkg.tar.zst dist/
           ls -l dist/

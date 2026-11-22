@@ -19,7 +19,7 @@ Do not put product behavior here.
 - `secrets` runs gitleaks `v8.30.1` with `--redact`. Checkout uses `fetch-depth: 0`.
 - `deploy` needs `web`, `rust`, and `secrets`. It runs only when `github.event_name == 'push'` and the ref is `main`. It rebuilds the web app, then deploys with `cloudflare/wrangler-action@v4`. It needs repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Pull requests and `workflow_dispatch` never reach this job.
 
-`release-arch.yml` runs only on a push of a `v*` tag. It needs `permissions: contents: write`. The job uses the `archlinux:latest` container.
+`release-arch.yml` runs on a push of a `v*` tag, on `main` when listed Rust or arch paths change (Cargo cache warm), and on `workflow_dispatch`. Tag pushes publish a GitHub Release. Other runs build the package and refresh the Cargo cache but skip `check-version.sh` and release upload. It needs `permissions: contents: write`. The job uses the `archlinux:latest` container, `actions/cache` on workspace `.cargo-cache`, and `makepkg --nocheck` (CI already tests the workspace).
 
 ## Rules
 
@@ -33,7 +33,7 @@ Do not put product behavior here.
 - Cargo invocations in CI stay `--locked`. The PKGBUILD stays `--frozen`.
 - Keep the Ubuntu apt mirror rewrite in the `rust` job. The Azure Ubuntu mirror has failed DNS in this workflow. The install step timeout stays 3 minutes.
 - Do not drop a library from the `rust` job or the Arch `pacman` line unless the applet builds without it.
-- Release must run `scripts/check-version.sh "$GITHUB_REF_NAME"` before `makepkg`. The tag, `apps/cosmic-coldfront/Cargo.toml` `version`, and `arch/PKGBUILD` `pkgver` must match.
+- Release tag runs must run `scripts/check-version.sh "$GITHUB_REF_NAME"` before `makepkg`. The tag, `apps/cosmic-coldfront/Cargo.toml` `version`, and `arch/PKGBUILD` `pkgver` must match. Cache-warm runs on `main` skip that step.
 - The source archive prefix stays `coldfront-$pkgver/`. Do not name it `cosmic-coldfront-$pkgver/`.
 - Run `makepkg` as the unprivileged `builder` user. Do not run it as root.
 - `git config --global --add safe.directory` stays. `actions/checkout` inside the container needs it.

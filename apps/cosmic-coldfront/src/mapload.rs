@@ -354,7 +354,6 @@ pub async fn prefetch_around(
     }
 }
 
-
 /// Recompose from cache for the current camera.
 ///
 /// Missing tiles paint as holes (pale basemap background / transparent radar),

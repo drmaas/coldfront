@@ -33,6 +33,7 @@ import {
   type EchoSample,
   type ReliefScene,
 } from "./radarRelief";
+import { pinCssAt } from "./radarPin";
 import {
   fetchViewTiles,
   placeCachedTiles,
@@ -55,12 +56,15 @@ interface Snapshot {
   camera: Camera;
   cssWidth: number;
   cssHeight: number;
+  pinCssX: number;
+  pinCssY: number;
 }
 
 export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
   const cardRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const pinOverlayRef = useRef<HTMLDivElement>(null);
   const glOk = useMemo(() => webgl2Available(), []);
   const [lookback, setLookback] = useState<RadarLookback>(1);
   const [speed, setSpeed] = useState<RadarSpeed>(1);
@@ -161,6 +165,20 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
     camera.pan.x === panRef.current.x &&
     camera.pan.y === panRef.current.y;
 
+  const syncPinOverlay = () => {
+    const pinEl = pinOverlayRef.current;
+    const snap = snapshotRef.current;
+    if (!pinEl || !snap || modeRef.current === "relief") {
+      if (pinEl) pinEl.style.display = "none";
+      return;
+    }
+    const { scale, tx, ty } = boardTransformRef.current;
+    pinEl.style.display = "block";
+    const x = tx + scale * snap.pinCssX;
+    const y = ty + scale * snap.pinCssY;
+    pinEl.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%) scale(${scale})`;
+  };
+
   const blitGesture = () => {
     blitRaf.current = 0;
     applyBoardTransform();
@@ -188,6 +206,7 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
     context.setTransform(scale, 0, 0, scale, tx * ratio, ty * ratio);
     context.imageSmoothingEnabled = Math.abs(scale - 1) > 0.001;
     context.drawImage(snap.canvas, 0, 0);
+    syncPinOverlay();
   };
 
   const scheduleBlit = () => {
@@ -244,12 +263,10 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
           context.drawImage(tile.source, tile.dx, tile.dy, TILE, TILE);
         }
       }
-      drawPin(context, (view.center.x - view.left) * TILE, (view.center.y - view.top) * TILE);
       return { drewRadar, ground: null, echoes: [], cols: 200, rows: 120 };
     }
 
-    // Ground = basemap (or fill) + pin only. Radar lives in the heightfield.
-    drawPin(context, (view.center.x - view.left) * TILE, (view.center.y - view.top) * TILE);
+    // Ground = basemap (or fill) only. Radar lives in the heightfield; pin sits on the mast.
     context.setTransform(1, 0, 0, 1, 0, 0);
     const ground = context.getImageData(0, 0, canvas.width, canvas.height);
     const radar = mosaicRadar(placed, view);
@@ -277,13 +294,24 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
     const snapCtx = snapCanvas.getContext("2d");
     if (!snapCtx) return;
     snapCtx.drawImage(source, 0, 0);
+    const pinCss = pinCssAt(
+      settleArgsRef.current.latitude,
+      settleArgsRef.current.longitude,
+      camera.zoom,
+      camera.pan,
+      view.cssWidth,
+      view.cssHeight,
+    );
     snapshotRef.current = {
       canvas: snapCanvas,
       camera: { zoom: camera.zoom, pan: { ...camera.pan } },
       cssWidth: view.cssWidth,
       cssHeight: view.cssHeight,
+      pinCssX: pinCss.x,
+      pinCssY: pinCss.y,
     };
     boardTransformRef.current = { scale: 1, tx: 0, ty: 0 };
+    syncPinOverlay();
   };
 
   const runSettle = async () => {
@@ -439,6 +467,10 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
   useEffect(() => {
     if (!glOk && mode === "relief") setMode("flat");
   }, [glOk, mode]);
+
+  useEffect(() => {
+    syncPinOverlay();
+  }, [mode, pan, zoom, ready, sizeTick]);
 
   useEffect(() => {
     if (lookbackForIndexRef.current === lookback) return;
@@ -857,6 +889,23 @@ export function RadarMap({ latitude, longitude, basemap }: RadarMapProps) {
         {(!ready || (relief && !ground)) && (
           <div className="radar-placeholder">{failed ? "Radar tiles unavailable" : "Loading radar…"}</div>
         )}
+        <div
+          ref={pinOverlayRef}
+          className="radar-location-pin"
+          aria-hidden
+          style={{ display: "none" }}
+        >
+          <svg width="28" height="36" viewBox="-14 -24 28 24" role="presentation">
+            <path
+              d="M0 0 C-11 -8 -9 -22 0 -22 C9 -22 11 -8 0 0 Z"
+              fill="#e11d48"
+              stroke="#fff"
+              strokeWidth="4"
+              strokeLinejoin="round"
+            />
+            <circle cx="0" cy="-13" r="3.2" fill="#fff" />
+          </svg>
+        </div>
         <div className="zoom-controls">
           {glOk && (
             <button
@@ -975,21 +1024,3 @@ function mosaicRadar(
   return { canvas: radarCanvas, image };
 }
 
-function drawPin(context: CanvasRenderingContext2D, x: number, y: number) {
-  context.save();
-  context.translate(x, y);
-  context.beginPath();
-  context.moveTo(0, 0);
-  context.bezierCurveTo(-11, -8, -9, -22, 0, -22);
-  context.bezierCurveTo(9, -22, 11, -8, 0, 0);
-  context.fillStyle = "#e11d48";
-  context.strokeStyle = "#fff";
-  context.lineWidth = 2;
-  context.fill();
-  context.stroke();
-  context.beginPath();
-  context.arc(0, -13, 3.2, 0, Math.PI * 2);
-  context.fillStyle = "#fff";
-  context.fill();
-  context.restore();
-}

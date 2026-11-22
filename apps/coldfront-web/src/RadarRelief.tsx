@@ -13,7 +13,7 @@ export interface RadarReliefProps {
   echoes: EchoSample[];
   cols?: number;
   rows?: number;
-  /** Table under the heightfield: basemap or plain fill, plus pin. No Flat radar. */
+  /** Table under the heightfield: basemap or plain fill. Pin is the mast mesh above echoes. */
   ground: ImageData | null;
   empty: boolean;
   /** Live pan/zoom of the last settled board (identity after settle). */
@@ -186,10 +186,9 @@ export function RadarRelief({
       gl.uniform1i(locs.uMode, 1);
       drawMesh(gl, fieldMesh);
 
-      if (!locked) {
-        gl.uniform1i(locs.uMode, 2);
-        drawMesh(gl, mastMesh);
-      }
+      // Location mast always above echo columns (default locked view included).
+      gl.uniform1i(locs.uMode, 2);
+      drawMesh(gl, mastMesh);
 
       frame = window.requestAnimationFrame(draw);
     };

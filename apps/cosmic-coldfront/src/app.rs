@@ -829,10 +829,11 @@ impl cosmic::Application for AppModel {
                 cache,
             } => {
                 self.tile_cache.absorb(&cache);
+                // Always clear so a bumped map_generation cannot leave fetch stuck.
+                self.lookback_batch_inflight = false;
                 if generation != self.map_generation {
                     return Task::none();
                 }
-                self.lookback_batch_inflight = false;
                 for offset in attempted {
                     self.finish_pending(offset);
                 }
@@ -1147,6 +1148,7 @@ impl AppModel {
         };
         self.map_generation = self.map_generation.wrapping_add(1);
         let generation = self.map_generation;
+        self.lookback_batch_inflight = false;
         self.rebuild_radar_frames();
         if clear_cache {
             self.tile_cache.clear();
@@ -1198,7 +1200,7 @@ impl AppModel {
                 pixel_ratio,
                 offset_minutes: first_offset,
             };
-            match mapload::ensure_map_frame(&client, &mut cache, &kind, &request).await {
+            match mapload::ensure_map_frame(&client, &mut cache, &kind, &request, &frames).await {
                 Ok(frame) => {
                     let mut pending: Vec<u32> = frames
                         .iter()
@@ -1245,6 +1247,7 @@ impl AppModel {
         let pan_y = self.pan_y;
         let (view_width, view_height) = self.map_size();
         let pixel_ratio = self.pixel_ratio;
+        let frames = self.radar_frames.clone();
         let mut cache = self.tile_cache.clone();
         cosmic::task::future(async move {
             let client = match HttpClient::new() {
@@ -1267,7 +1270,7 @@ impl AppModel {
                 pixel_ratio,
                 offset_minutes: offset,
             };
-            match mapload::ensure_map_frame(&client, &mut cache, &kind, &request).await {
+            match mapload::ensure_map_frame(&client, &mut cache, &kind, &request, &frames).await {
                 Ok(frame) => Message::OlderFrame {
                     generation,
                     zoom,
@@ -1493,6 +1496,7 @@ impl AppModel {
         };
         self.map_generation = self.map_generation.wrapping_add(1);
         let generation = self.map_generation;
+        self.lookback_batch_inflight = false;
         self.map_error = None;
         let kind = basemap_kind(&self.config);
         let zoom = self.zoom;
@@ -1501,6 +1505,7 @@ impl AppModel {
         let (view_width, view_height) = self.map_size();
         let pixel_ratio = self.pixel_ratio;
         let shown_offset = self.shown_offset;
+        let frames = self.radar_frames.clone();
         let extra_offsets: Vec<u32> = self
             .frames_ready
             .iter()
@@ -1537,8 +1542,15 @@ impl AppModel {
                 pixel_ratio,
                 offset_minutes: shown_offset,
             };
-            match mapload::ensure_map_frames(&client, &mut cache, &kind, &request, &extra_offsets)
-                .await
+            match mapload::ensure_map_frames(
+                &client,
+                &mut cache,
+                &kind,
+                &request,
+                &extra_offsets,
+                &frames,
+            )
+            .await
             {
                 Ok(frame) => Message::MapReady {
                     generation,
@@ -1585,8 +1597,11 @@ impl AppModel {
                 // Cache-only paint. settle_now bumps map_generation and cancels in-flight
                 // fullscreen refreshes, which freezes playback on large maps.
                 self.gesturing = false;
-                let _ = self.recompose_current();
-                Task::none()
+                if self.recompose_current() {
+                    return Task::none();
+                }
+                // No tiles at this camera yet (pan/zoom before lookback settle).
+                self.schedule_settle()
             }
         }
     }
@@ -1731,6 +1746,7 @@ impl AppModel {
             PlaybackStep::Wait | PlaybackStep::Stay => None,
         };
         let generation = self.map_generation;
+        let frames = self.radar_frames.clone();
         let mut cache = self.tile_cache.clone();
         cosmic::task::future(async move {
             let Ok(client) = HttpClient::new() else {
@@ -1750,7 +1766,8 @@ impl AppModel {
                 pixel_ratio,
                 offset_minutes: shown_offset,
             };
-            mapload::prefetch_around(&client, &mut cache, &kind, &request, next_offset).await;
+            mapload::prefetch_around(&client, &mut cache, &kind, &request, &frames, next_offset)
+                .await;
             Message::PrefetchDone {
                 generation,
                 cache: Box::new(cache),
@@ -1892,6 +1909,7 @@ impl AppModel {
         let (view_width, view_height) = self.map_size();
         let pixel_ratio = self.pixel_ratio;
         let shown_offset = self.shown_offset;
+        let frames = self.radar_frames.clone();
         let attempted = self.pending_offsets.clone();
         let mut cache = self.tile_cache.clone();
         cosmic::task::future(async move {
@@ -1914,8 +1932,10 @@ impl AppModel {
                 pixel_ratio,
                 offset_minutes: shown_offset,
             };
-            let _ =
-                mapload::ensure_map_frames(&client, &mut cache, &kind, &request, &attempted).await;
+            let _ = mapload::ensure_map_frames(
+                &client, &mut cache, &kind, &request, &attempted, &frames,
+            )
+            .await;
             let (viewport, frac_scale) = mapload::viewport_for(
                 place.latitude,
                 place.longitude,
@@ -1963,7 +1983,10 @@ impl AppModel {
         let Some(instant) = instant else {
             return String::new();
         };
-        let zone = self.forecast.as_ref().map(|forecast| forecast.timezone.as_str());
+        let zone = self
+            .forecast
+            .as_ref()
+            .map(|forecast| forecast.timezone.as_str());
         format_radar_clock(instant, zone)
     }
 

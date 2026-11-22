@@ -83,6 +83,7 @@ export function RadarMap({ latitude, longitude, basemap, timeZone }: RadarMapPro
   const [failed, setFailed] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [sizeTick, setSizeTick] = useState(0);
+  const [lookbackKick, setLookbackKick] = useState(0);
   const [mode, setMode] = useState<RadarMode>("flat");
   const [echoes, setEchoes] = useState<EchoSample[]>([]);
   const [echoCols, setEchoCols] = useState(200);
@@ -97,6 +98,7 @@ export function RadarMap({ latitude, longitude, basemap, timeZone }: RadarMapPro
   const readyOffsetsRef = useRef(new Set<number>());
   const pendingOffsetsRef = useRef(new Set<number>());
   const lookbackFetchGen = useRef(0);
+  const lookbackFetchInflight = useRef(false);
   const wheelRaf = useRef(0);
   const blitRaf = useRef(0);
   const settleTimer = useRef(0);
@@ -482,6 +484,7 @@ export function RadarMap({ latitude, longitude, basemap, timeZone }: RadarMapPro
     readyOffsetsRef.current.clear();
     pendingOffsetsRef.current.clear();
     lookbackFetchGen.current += 1;
+    lookbackFetchInflight.current = false;
   }, [latitude, longitude, basemap]);
 
   useEffect(() => {
@@ -532,26 +535,44 @@ export function RadarMap({ latitude, longitude, basemap, timeZone }: RadarMapPro
     }
     for (const item of missing) pendingOffsetsRef.current.add(item.offsetMinutes);
     const gen = ++lookbackFetchGen.current;
+    lookbackFetchInflight.current = true;
     void fetchRadarLayers(
       view,
       missing.map((item) => item.layer),
     ).then(() => {
       if (gen !== lookbackFetchGen.current) return;
+      lookbackFetchInflight.current = false;
+      // Re-read camera: pan/zoom/resize may have moved while tiles downloaded.
+      const liveStage = stageRef.current;
+      const liveView = liveStage
+        ? readView(
+            liveStage.clientWidth,
+            liveStage.clientHeight,
+            latitude,
+            longitude,
+            zoomRef.current,
+            panRef.current,
+            window.devicePixelRatio || 1,
+          )
+        : null;
+      const check = liveView ?? view;
       for (const item of missing) {
-        pendingOffsetsRef.current.delete(item.offsetMinutes);
-        if (viewRadarReady(view, item.layer)) {
+        if (viewRadarReady(check, item.layer)) {
           readyOffsetsRef.current.add(item.offsetMinutes);
+          pendingOffsetsRef.current.delete(item.offsetMinutes);
         }
+        // else leave in pending so Wait can kick another pass at the live camera
       }
       setReadyTick((tick) => tick + 1);
     });
     return undefined;
-  }, [lookback, frames, latitude, longitude]);
+  }, [lookback, frames, latitude, longitude, basemap, sizeTick, lookbackKick]);
 
   useEffect(() => {
     if (!playing) return undefined;
     const offsets = frames.map((item) => item.offsetMinutes);
     const timer = window.setInterval(() => {
+      let kickLookback = false;
       setIndex((current) => {
         const shown = frames[current]?.offsetMinutes ?? offsets[offsets.length - 1] ?? 0;
         const step = nextPlaybackStep(
@@ -560,10 +581,17 @@ export function RadarMap({ latitude, longitude, basemap, timeZone }: RadarMapPro
           pendingOffsetsRef.current,
           shown,
         );
+        if (step.kind === "wait") {
+          if (pendingOffsetsRef.current.size > 0 && !lookbackFetchInflight.current) {
+            kickLookback = true;
+          }
+          return current;
+        }
         if (step.kind !== "advance") return current;
         const next = frames.findIndex((item) => item.offsetMinutes === step.offsetMinutes);
         return next >= 0 ? next : current;
       });
+      if (kickLookback) setLookbackKick((kick) => kick + 1);
     }, intervalMs);
     return () => window.clearInterval(timer);
   }, [playing, frames, intervalMs]);

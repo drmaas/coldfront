@@ -21,5 +21,16 @@
       "enabled": true,
       "head_sampling_rate": 0.01
     }
-  }
+  },
+  // Per-IP map tile quota before MapTiler. Approximate per PoP; see mapTileGuard.ts.
+  "ratelimits": [
+    {
+      "name": "MAP_TILE_RATE_LIMITER",
+      "namespace_id": "4242",
+      "simple": {
+        "limit": 600,
+        "period": 60
+      }
+    }
+  ]
 }

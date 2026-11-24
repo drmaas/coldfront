@@ -105,7 +105,7 @@ Only `GET` and `HEAD` are allowed. Other methods return 405.
 
 Latitude must be finite and from -90 to 90. Longitude must be finite and from -180 to 180. Missing or out-of-range coordinates return 400.
 
-Map tiles reject zoom above 18, or x or y outside `2 ** zoom`, with 400. With no key, `/api/map/...` returns 404 `basemap unavailable`.
+Map tiles reject zoom above 18, or x or y outside `2 ** zoom`, with 400. With no key, `/api/map/...` returns 404 `basemap unavailable`. Cross-origin or direct off-site use without a same-site `Origin` or `Referer` returns 403 and never reaches MapTiler. Per-IP rate limits return 429 when exceeded (Wrangler rate-limit binding at the edge; counts are approximate per PoP).
 
 Upstream requests set `user-agent` to `Coldfront/0.1 (https://github.com/drmaas/coldfront)` and `accept` to `application/json` or `image/png`.
 

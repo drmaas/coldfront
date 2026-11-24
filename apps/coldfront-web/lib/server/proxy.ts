@@ -3,7 +3,20 @@
  * The MapTiler key stays on the server. Callers must not echo upstream URLs.
  */
 
+import {
+  mapTileClientKey,
+  mapTileSameSiteAllowed,
+  type MapTileRateLimit,
+} from "./mapTileGuard";
+
 export const USER_AGENT = "Coldfront/0.1 (https://github.com/drmaas/coldfront)";
+
+const MAP_TILE_PATH = /^\/api\/map\/(\d+)\/(\d+)\/(\d+)\.png$/;
+
+export interface ProxyContext {
+  /** When set, applied to /api/map after the same-site check. */
+  mapTileRateLimit?: MapTileRateLimit;
+}
 
 /** Open-Meteo geocode upstream timeout passed to `AbortSignal.timeout`. */
 export const GEOCODE_UPSTREAM_TIMEOUT_MS = 11_000;
@@ -80,11 +93,25 @@ export function planApi(url: URL, maptilerKey: string | undefined): ApiPlan {
   return text(404, "not found");
 }
 
-export async function proxyApi(request: Request, maptilerKey: string | undefined): Promise<Response> {
+export async function proxyApi(
+  request: Request,
+  maptilerKey: string | undefined,
+  context?: ProxyContext,
+): Promise<Response> {
   if (request.method !== "GET" && request.method !== "HEAD") {
     return new Response("method not allowed", { status: 405 });
   }
-  const plan = planApi(new URL(request.url), maptilerKey);
+  const requestUrl = new URL(request.url);
+  if (MAP_TILE_PATH.test(requestUrl.pathname)) {
+    if (!mapTileSameSiteAllowed(request, requestUrl)) {
+      return denyMapTile(403, "forbidden");
+    }
+    if (context?.mapTileRateLimit) {
+      const { allowed } = await context.mapTileRateLimit(mapTileClientKey(request));
+      if (!allowed) return denyMapTile(429, "rate limit exceeded");
+    }
+  }
+  const plan = planApi(requestUrl, maptilerKey);
   if (plan.type === "ignore" || plan.type === "response") {
     if (plan.type === "ignore") return new Response("not found", { status: 404 });
     return new Response(plan.body, {
@@ -136,4 +163,11 @@ function numberParam(url: URL, name: string, min: number, max: number): number |
   const value = Number(raw);
   if (!Number.isFinite(value) || value < min || value > max) return null;
   return value;
+}
+
+function denyMapTile(status: 403 | 429, body: string): Response {
+  return new Response(body, {
+    status,
+    headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
+  });
 }

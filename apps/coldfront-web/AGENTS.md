@@ -50,6 +50,8 @@ From the repository root, `just check` includes those steps.
 - Missing coordinates return 400.
 - Tile zoom above 18, or x or y out of range, returns 400.
 - Missing MapTiler key on `/api/map/...` returns 404 `basemap unavailable`.
+- `/api/map/...` requires a same-site `Origin` or `Referer` (production host `coldfront.fyi` plus the request host). Others get 403 without calling MapTiler. See `lib/server/mapTileGuard.ts`.
+- `/api/map/...` is rate limited per client IP (Wrangler `ratelimits` binding in production; in-isolate fallback when the binding is absent).
 - Upstream network failure returns 502 `upstream failed`.
 - A non-OK alerts response becomes `[]` in `loadForecast`. A forecast failure rejects the page. Alerts JSON that throws in `parseAlerts` also rejects the page.
 

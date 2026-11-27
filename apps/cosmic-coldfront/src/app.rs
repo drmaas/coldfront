@@ -121,6 +121,8 @@ pub struct AppModel {
     gesture_paint_at: Option<Instant>,
     /// A coalesced gesture paint is waiting out the frame budget.
     gesture_paint_scheduled: bool,
+    /// Show the on-map pan/zoom hint until the first map gesture.
+    gesture_hint: bool,
     pending_offsets: Vec<u32>,
     frames_ready: Vec<u32>,
     lookback_batch_inflight: bool,
@@ -330,6 +332,7 @@ impl cosmic::Application for AppModel {
             gesturing: false,
             gesture_paint_at: None,
             gesture_paint_scheduled: false,
+            gesture_hint: true,
             pending_offsets: Vec::new(),
             frames_ready: Vec::new(),
             lookback_batch_inflight: false,
@@ -1723,9 +1726,10 @@ impl AppModel {
                     self.zoom = next.zoom;
                     self.pan_x = next.pan_x;
                     self.pan_y = next.pan_y;
-                    self.gesturing = true;
-                    let _ = self.recompose_current();
-                    self.schedule_settle()
+                    // Same coalesced cache paint as pan. A compose per touchpad
+                    // event cannot keep up, and `board_transform` scales the last
+                    // frame toward the new zoom until the next paint lands.
+                    self.paint_gesture()
                 } else {
                     self.pan_x += f64::from(x);
                     self.pan_y += f64::from(y);
@@ -1744,6 +1748,7 @@ impl AppModel {
     /// keeps the motion immediate; the scheduled paint then catches up.
     fn paint_gesture(&mut self) -> Task<cosmic::Action<Message>> {
         self.gesturing = true;
+        self.gesture_hint = false;
         let settle = self.schedule_settle();
         if self.gesture_paint_scheduled {
             return settle;
@@ -2087,6 +2092,11 @@ impl AppModel {
         }
         let (view_width, view_height) = self.map_size();
         self.pixel_ratio > 1.0 || gesture_render_scale(view_width, view_height) < 1.0
+    }
+
+    /// Show the pan/zoom hint until the first map gesture paints a frame.
+    pub(crate) fn show_gesture_hint(&self) -> bool {
+        self.gesture_hint && self.map_handle.is_some()
     }
 
     pub(crate) fn current_frame_caption(&self) -> String {

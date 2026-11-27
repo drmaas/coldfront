@@ -167,6 +167,18 @@ pub fn popup(app: &AppModel) -> Element<'_, Message> {
         .into()
 }
 
+/// Small rounded plate for on-map chips (clock, hint) and the zoom controls.
+fn chip_style(theme: &cosmic::Theme) -> cosmic::widget::container::Style {
+    let cosmic = theme.cosmic();
+    let mut style = popup_fill(theme);
+    style.border = cosmic::iced::Border {
+        width: 1.0,
+        radius: cosmic.corner_radii.radius_s.into(),
+        color: style.border.color,
+    };
+    style
+}
+
 /// Solid popup fill. `popup_container` follows `theme.transparent`, which is
 /// the frosted applet color and lets the panel show through.
 fn popup_fill(theme: &cosmic::Theme) -> cosmic::widget::container::Style {
@@ -419,6 +431,7 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
             transform: app.board_transform(),
             settled_width: settled_w as f32,
             settled_height: settled_h as f32,
+            low_res: app.gesture_low_res(),
         };
         widget::canvas(stage)
             .width(Length::Fixed(width as f32))
@@ -502,16 +515,7 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
 
     let plate = widget::container(zoom_controls)
         .width(Length::Shrink)
-        .style(|theme| {
-            let cosmic = theme.cosmic();
-            let mut style = popup_fill(theme);
-            style.border = cosmic::iced::Border {
-                width: 1.0,
-                radius: cosmic.corner_radii.radius_s.into(),
-                color: style.border.color,
-            };
-            style
-        });
+        .style(chip_style);
 
     // Align plate top-right. Empty Fill area reports no interaction, so pan works.
     let zoom_overlay = widget::container(plate)
@@ -523,17 +527,25 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
 
     let clock = widget::container(widget::text::caption(app.current_frame_clock()))
         .padding([4, 8])
-        .style(|theme| {
-            let cosmic = theme.cosmic();
-            let mut style = popup_fill(theme);
-            style.border = cosmic::iced::Border {
-                width: 1.0,
-                radius: cosmic.corner_radii.radius_s.into(),
-                color: style.border.color,
-            };
-            style
-        });
-    let clock_overlay = widget::container(clock)
+        .style(chip_style);
+    let mut top_left = widget::Column::new()
+        .spacing(spacing.space_xxxs)
+        .push(clock);
+    // Discoverable once, then out of the way: the first pan, orbit, or zoom
+    // clears it. Relief has one extra gesture to name.
+    if app.show_gesture_hint() {
+        let hint = if app.radar_mode == crate::app::RadarMode::Relief {
+            fl!("radar-hint-relief")
+        } else {
+            fl!("radar-hint")
+        };
+        top_left = top_left.push(
+            widget::container(widget::text::caption(hint))
+                .padding([4, 8])
+                .style(chip_style),
+        );
+    }
+    let clock_overlay = widget::container(top_left)
         .width(Length::Fill)
         .height(Length::Fill)
         .align_x(cosmic::iced::alignment::Horizontal::Left)
@@ -1115,6 +1127,8 @@ struct RadarStage {
     transform: SnapshotTransform,
     settled_width: f32,
     settled_height: f32,
+    /// The frame was composed below the display pixel ratio for a gesture.
+    low_res: bool,
 }
 
 impl canvas::Program<Message, cosmic::Theme> for RadarStage {
@@ -1136,7 +1150,8 @@ impl canvas::Program<Message, cosmic::Theme> for RadarStage {
         frame.with_save(|frame| {
             frame.translate(Vector::new(tx, ty));
             frame.scale(scale);
-            let filter = if (self.transform.scale - 1.0).abs() > 0.001 {
+            let scaled = (self.transform.scale - 1.0).abs() > 0.001;
+            let filter = if scaled || self.low_res {
                 FilterMethod::Linear
             } else {
                 FilterMethod::Nearest

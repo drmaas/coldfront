@@ -1,12 +1,13 @@
 ---
 name: coldfront-dev
 description: >-
-  Build, run, install, and uninstall the Coldfront COSMIC applet, and run the
-  web app locally. Use whenever the user wants to build, run, start, install,
-  uninstall, or reload cosmic-coldfront or the panel applet, or run, start, or
-  preview the web app, even if they only mention just, cargo, pnpm, sudo, the
-  panel, or localhost and do not name this skill. Includes the sudo PATH trap
-  and the --no-deps install and uninstall commands.
+  Build, run, install, and uninstall the Coldfront COSMIC applet, restart the
+  COSMIC panel, and run the web app locally. Use whenever the user wants to
+  build, run, start, install, uninstall, reload, or restart cosmic-coldfront or
+  the panel applet, or run, start, or preview the web app, even if they only
+  mention just, cargo, pnpm, sudo, the panel, or localhost and do not name this
+  skill. Includes the sudo PATH trap, the --no-deps install and uninstall
+  commands, and the panel restart script.
 ---
 
 # Coldfront local dev
@@ -36,7 +37,17 @@ sudo just --justfile apps/cosmic-coldfront/justfile --no-deps uninstall
 
 `--no-deps` skips `build-release`. `sudo just applet install` rebuilds as root, fails to find `cargo`, and can leave `target/` owned by root.
 
-After an install, restart the applet. The panel keeps the process that was already running. A saved ZIP, unit choice, MapTiler key, and the OSM toggle live in cosmic-config for app id `io.github.drmaas.CosmicColdfront`. The forecast itself is memory only. Open the popup again after restart to load weather.
+The panel keeps the process that was already running, so an installed binary does not take effect until the panel restarts it. Ask the user whether to restart the panel now. Do not restart it unasked: the panel and every applet on it briefly disappear.
+
+```bash
+scripts/restart-panel.sh
+```
+
+The script sends `cosmic-panel` SIGTERM, `cosmic-session` respawns it, and the applets, `cosmic-coldfront` included, come back as children of the new panel. `--dry-run` prints the plan and stops. `--timeout SECONDS` changes the wait for the respawn (default 15).
+
+When the user declines, say the new binary loads on the next panel restart or login, and leave the running applet alone.
+
+A saved ZIP, unit choice, MapTiler key, and the OSM toggle live in cosmic-config for app id `io.github.drmaas.CosmicColdfront`. The forecast itself is memory only. Open the popup again after restart to load weather.
 
 ## Web app
 

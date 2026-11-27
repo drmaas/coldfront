@@ -30,3 +30,6 @@ release *args:
 
 install-applet *args:
     scripts/install-applet.sh {{ args }}
+
+restart-panel *args:
+    scripts/restart-panel.sh {{ args }}

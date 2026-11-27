@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cosmic::iced::keyboard::{self, Modifiers};
 use cosmic::iced::mouse::Button as MouseButton;
@@ -43,6 +43,13 @@ const WEATHER_REFRESH: Duration = Duration::from_secs(30 * 60);
 /// Debounce before fetching newly visible edge tiles. Short so pan feels like
 /// the web canvas (tiles stream in while the camera moves).
 const MAP_SETTLE: Duration = Duration::from_millis(50);
+/// Longest gap between paints while the camera moves. Pointer motion slides the
+/// last frame between these, so compose runs at most once per display frame.
+const GESTURE_FRAME: Duration = Duration::from_millis(16);
+/// Most pixels a gesture frame may compose. Larger views render smaller and the
+/// canvas scales them up until settle, so a fullscreen pan paints inside a
+/// frame instead of blocking the event loop on a resample.
+const GESTURE_PIXEL_BUDGET: f64 = 500_000.0;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum PopupTab {
@@ -110,6 +117,10 @@ pub struct AppModel {
     settled_height: u32,
     pixel_ratio: f64,
     gesturing: bool,
+    /// When a gesture last painted the map from cache.
+    gesture_paint_at: Option<Instant>,
+    /// A coalesced gesture paint is waiting out the frame budget.
+    gesture_paint_scheduled: bool,
     pending_offsets: Vec<u32>,
     frames_ready: Vec<u32>,
     lookback_batch_inflight: bool,
@@ -201,6 +212,8 @@ pub enum Message {
     MapMove(Point),
     MapScroll(ScrollDelta),
     MapSettle(u64),
+    /// Deferred gesture paint, scheduled by [`AppModel::paint_gesture`].
+    GestureCompose,
     PrefetchDone {
         generation: u64,
         cache: Box<TileCache>,
@@ -315,6 +328,8 @@ impl cosmic::Application for AppModel {
             settled_height: MAP_VIEW_HEIGHT,
             pixel_ratio: 1.0,
             gesturing: false,
+            gesture_paint_at: None,
+            gesture_paint_scheduled: false,
             pending_offsets: Vec::new(),
             frames_ready: Vec::new(),
             lookback_batch_inflight: false,
@@ -602,9 +617,7 @@ impl cosmic::Application for AppModel {
                 self.pan_y = 0.0;
                 let (view_width, view_height) = self.map_size();
                 self.relief_camera = default_relief_camera(view_width, view_height);
-                self.gesturing = true;
-                let _ = self.recompose_current();
-                return self.schedule_settle();
+                return self.paint_gesture();
             }
             Message::ToggleRadarMode => {
                 self.radar_mode = match self.radar_mode {
@@ -677,17 +690,15 @@ impl cosmic::Application for AppModel {
                     }) => {
                         self.pan_x = pan_x + f64::from(point.x - start.x);
                         self.pan_y = pan_y + f64::from(point.y - start.y);
-                        self.gesturing = true;
-                        // Paint from cache at the live camera so the stage stays
-                        // filled. snapshot_transform alone slides the old bitmap
-                        // off the window until settle.
-                        let _ = self.recompose_current();
+                        // Painted from cache at the live camera, coalesced to
+                        // one frame so pointer motion stays ahead of compose.
+                        return self.paint_gesture();
                     }
                     Some(DragState::Orbit { start, yaw, pitch }) => {
                         self.relief_camera.yaw = yaw + (point.x - start.x) * 0.005;
                         self.relief_camera.pitch =
                             clamp_relief_pitch(pitch + (point.y - start.y) * 0.004);
-                        self.paint_relief_from_cache();
+                        return self.paint_gesture();
                     }
                     None => {}
                 }
@@ -698,6 +709,13 @@ impl cosmic::Application for AppModel {
                     self.gesturing = false;
                     self.apply_deferred_shown_offset();
                     return self.refresh_visible_map();
+                }
+            }
+            Message::GestureCompose => {
+                self.gesture_paint_scheduled = false;
+                if self.gesturing {
+                    self.gesture_paint_at = Some(Instant::now());
+                    self.paint_gesture_frame();
                 }
             }
             Message::PrefetchDone { generation, cache } => {
@@ -1394,21 +1412,38 @@ impl AppModel {
             return false;
         };
         let (view_width, view_height) = self.map_size();
+        // Gesture paints render below display resolution: a fullscreen frame at
+        // the display pixel ratio costs more than a frame budget to resample, so
+        // the canvas scales the gesture frame up until settle repaints sharp.
+        let render_scale = if self.gesturing {
+            gesture_render_scale(view_width, view_height)
+        } else {
+            1.0
+        };
+        let render_width = ((f64::from(view_width) * render_scale).round() as u32).max(1);
+        let render_height = ((f64::from(view_height) * render_scale).round() as u32).max(1);
         let (viewport, frac_scale) = mapload::viewport_for(
             place.latitude,
             place.longitude,
             self.zoom,
-            self.pan_x,
-            self.pan_y,
-            view_width,
-            view_height,
+            self.pan_x * render_scale,
+            self.pan_y * render_scale,
+            render_width,
+            render_height,
         );
         let kind = basemap_kind(&self.config);
+        // One device pixel per logical pixel while moving: on HiDPI that is a
+        // quarter of the resample and upload of the settled frame.
+        let pixel_ratio = if self.gesturing {
+            1.0
+        } else {
+            self.pixel_ratio
+        };
         let present = mapload::PresentScale {
             frac_scale,
-            view_width,
-            view_height,
-            pixel_ratio: self.pixel_ratio,
+            view_width: render_width,
+            view_height: render_height,
+            pixel_ratio,
         };
         if self.radar_mode == RadarMode::Relief {
             let Ok((ground, radar, radar_tiles)) = mapload::compose_relief_layers(
@@ -1634,9 +1669,7 @@ impl AppModel {
         self.zoom = next.zoom;
         self.pan_x = next.pan_x;
         self.pan_y = next.pan_y;
-        self.gesturing = true;
-        let _ = self.recompose_current();
-        self.schedule_settle()
+        self.paint_gesture()
     }
 
     fn handle_scroll(&mut self, delta: ScrollDelta) -> Task<cosmic::Action<Message>> {
@@ -1668,9 +1701,7 @@ impl AppModel {
                 self.zoom = next.zoom;
                 self.pan_x = next.pan_x;
                 self.pan_y = next.pan_y;
-                self.gesturing = true;
-                let _ = self.recompose_current();
-                self.schedule_settle()
+                self.paint_gesture()
             }
             ScrollDelta::Pixels { x, y } => {
                 if self.ctrl_held {
@@ -1698,11 +1729,52 @@ impl AppModel {
                 } else {
                     self.pan_x += f64::from(x);
                     self.pan_y += f64::from(y);
-                    self.gesturing = true;
-                    let _ = self.recompose_current();
-                    self.schedule_settle()
+                    self.paint_gesture()
                 }
             }
+        }
+    }
+
+    /// Repaint the live gesture camera from cache, coalesced to one paint per
+    /// [`GESTURE_FRAME`].
+    ///
+    /// Pointer motion arrives far faster than a fullscreen compose can run, so a
+    /// paint per event backs up the event loop and the map falls behind the
+    /// pointer. Between paints `board_transform` slides the last frame, which
+    /// keeps the motion immediate; the scheduled paint then catches up.
+    fn paint_gesture(&mut self) -> Task<cosmic::Action<Message>> {
+        self.gesturing = true;
+        let settle = self.schedule_settle();
+        if self.gesture_paint_scheduled {
+            return settle;
+        }
+        let now = Instant::now();
+        if gesture_paint_due(self.gesture_paint_at, now) {
+            self.gesture_paint_at = Some(now);
+            self.paint_gesture_frame();
+            return settle;
+        }
+        self.gesture_paint_scheduled = true;
+        let wait = self
+            .gesture_paint_at
+            .map(|last| GESTURE_FRAME.saturating_sub(now.duration_since(last)))
+            .unwrap_or_default();
+        Task::batch([
+            settle,
+            cosmic::task::future(async move {
+                tokio::time::sleep(wait).await;
+                Message::GestureCompose
+            }),
+        ])
+    }
+
+    /// Paint one gesture frame: relief orbit re-renders the heightfield, every
+    /// other gesture recomposes the viewport.
+    fn paint_gesture_frame(&mut self) {
+        if matches!(self.drag, Some(DragState::Orbit { .. })) {
+            self.paint_relief_from_cache();
+        } else {
+            let _ = self.recompose_current();
         }
     }
 
@@ -2007,6 +2079,16 @@ impl AppModel {
         self.drag.is_some()
     }
 
+    /// True while a gesture frame is painted below display resolution, so the
+    /// canvas should smooth it while scaling back up.
+    pub(crate) fn gesture_low_res(&self) -> bool {
+        if !self.gesturing {
+            return false;
+        }
+        let (view_width, view_height) = self.map_size();
+        self.pixel_ratio > 1.0 || gesture_render_scale(view_width, view_height) < 1.0
+    }
+
     pub(crate) fn current_frame_caption(&self) -> String {
         let mut label = self.current_frame_label();
         if self.radar_mode == RadarMode::Relief {
@@ -2162,6 +2244,22 @@ pub(crate) fn playback_advance_during_gesture(
     }
 }
 
+/// True when a gesture may paint now: immediately when nothing has painted yet,
+/// otherwise once [`GESTURE_FRAME`] has passed since the last paint.
+pub(crate) fn gesture_paint_due(last: Option<Instant>, now: Instant) -> bool {
+    last.is_none_or(|last| now.duration_since(last) >= GESTURE_FRAME)
+}
+
+/// Linear scale for a gesture frame: 1.0 when the view already fits
+/// [`GESTURE_PIXEL_BUDGET`], otherwise the factor that fits it.
+pub(crate) fn gesture_render_scale(view_width: u32, view_height: u32) -> f64 {
+    let pixels = f64::from(view_width.max(1)) * f64::from(view_height.max(1));
+    if pixels <= GESTURE_PIXEL_BUDGET {
+        return 1.0;
+    }
+    (GESTURE_PIXEL_BUDGET / pixels).sqrt().clamp(0.5, 1.0)
+}
+
 /// Next loop step over the full lookback list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PlaybackStep {
@@ -2202,7 +2300,8 @@ mod tests {
     use coldfront_core::{RadarSpeed, applet_radar_interval_ms};
 
     use super::{
-        PlaybackStep, format_panel_temperature, merge_lookback_offsets, next_playback_step,
+        GESTURE_FRAME, GESTURE_PIXEL_BUDGET, PlaybackStep, format_panel_temperature,
+        gesture_paint_due, gesture_render_scale, merge_lookback_offsets, next_playback_step,
         playback_advance_during_gesture, prefetch_absorb_allowed,
     };
 
@@ -2211,6 +2310,24 @@ mod tests {
         assert_eq!(format_panel_temperature(11.666_666_666_7, true), "53°F");
         assert_eq!(format_panel_temperature(12.4, false), "12°C");
         assert_eq!(format_panel_temperature(-1.5, false), "-2°C");
+    }
+
+    #[test]
+    fn gesture_paint_waits_for_the_frame_budget() {
+        let now = std::time::Instant::now();
+        assert!(gesture_paint_due(None, now));
+        assert!(!gesture_paint_due(Some(now), now + GESTURE_FRAME / 2));
+        assert!(gesture_paint_due(Some(now), now + GESTURE_FRAME));
+    }
+
+    #[test]
+    fn gesture_frames_stay_inside_the_pixel_budget() {
+        assert!((gesture_render_scale(416, 220) - 1.0).abs() < 1e-9);
+        let fullscreen = gesture_render_scale(1872, 880);
+        assert!(fullscreen < 1.0);
+        let painted = f64::from(1872) * f64::from(880) * fullscreen * fullscreen;
+        assert!((painted - GESTURE_PIXEL_BUDGET).abs() < 1.0);
+        assert!((gesture_render_scale(8000, 4000) - 0.5).abs() < 1e-9);
     }
 
     #[test]

@@ -419,6 +419,7 @@ fn radar_tab(app: &AppModel) -> Element<'_, Message> {
             transform: app.board_transform(),
             settled_width: settled_w as f32,
             settled_height: settled_h as f32,
+            low_res: app.gesture_low_res(),
         };
         widget::canvas(stage)
             .width(Length::Fixed(width as f32))
@@ -1115,6 +1116,8 @@ struct RadarStage {
     transform: SnapshotTransform,
     settled_width: f32,
     settled_height: f32,
+    /// The frame was composed below the display pixel ratio for a gesture.
+    low_res: bool,
 }
 
 impl canvas::Program<Message, cosmic::Theme> for RadarStage {
@@ -1136,7 +1139,8 @@ impl canvas::Program<Message, cosmic::Theme> for RadarStage {
         frame.with_save(|frame| {
             frame.translate(Vector::new(tx, ty));
             frame.scale(scale);
-            let filter = if (self.transform.scale - 1.0).abs() > 0.001 {
+            let scaled = (self.transform.scale - 1.0).abs() > 0.001;
+            let filter = if scaled || self.low_res {
                 FilterMethod::Linear
             } else {
                 FilterMethod::Nearest

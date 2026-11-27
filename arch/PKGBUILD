@@ -18,7 +18,7 @@
 # unpacks to coldfront-$pkgver, not cosmic-coldfront-$pkgver.
 
 pkgname=cosmic-coldfront
-pkgver=0.2.2
+pkgver=0.2.3
 pkgrel=1
 pkgdesc='Weather, forecast, and radar applet for the COSMIC desktop'
 arch=('x86_64')

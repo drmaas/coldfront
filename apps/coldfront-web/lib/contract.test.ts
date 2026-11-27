@@ -33,6 +33,7 @@ import {
   webRadarIntervalMs,
 } from "./domain";
 import { bandHeight, fitOrthoHalfExtents } from "../src/radarRelief";
+import { planApi } from "./server/proxy";
 
 const fixtures = resolve(import.meta.dirname, "../../../fixtures");
 
@@ -141,6 +142,7 @@ const contract = fixture("contract.json") as {
     eureka_ca_latitude: number;
     eureka_ca_longitude: number;
   };
+  open_meteo: { base: string; params: Record<string, string> };
   zips: { valid: string[]; invalid: string[] };
   relief: {
     bands: Array<{ r: number; g: number; b: number; height: number }>;
@@ -260,6 +262,22 @@ describe("shared fixtures", () => {
     );
     expect(equal.left).toBeCloseTo(contract.chart.equal_range.left, 3);
     expect(equal.width).toBeCloseTo(contract.chart.equal_range.width, 3);
+  });
+
+  it("sends the same Open-Meteo forecast query as Rust", () => {
+    const plan = planApi(
+      new URL("https://coldfront.local/api/forecast?latitude=45.071&longitude=-92.9391"),
+      undefined,
+    );
+    expect(plan.type).toBe("upstream");
+    if (plan.type !== "upstream") return;
+    const target = new URL(plan.upstream.url);
+    expect(`${target.origin}${target.pathname}`).toBe(contract.open_meteo.base);
+    expect(Object.fromEntries(target.searchParams)).toEqual({
+      latitude: "45.071",
+      longitude: "-92.9391",
+      ...contract.open_meteo.params,
+    });
   });
 
   it("maps weather codes", () => {

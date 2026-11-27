@@ -19,7 +19,8 @@ Change a shared rule in Rust, in TypeScript, and in `fixtures/contract.json` in 
 | Day/night display icon id | `display_icon` / `displayIcon` | yes |
 | Web Mercator tile math | `lat_lon_to_tile`, `tile_window` | yes |
 | IEM tile URL and radar frame lists | `iem_tile_url`, `web_radar_frames`, `applet_radar_frames`, lookback lists, interval helpers, `format_radar_clock` | yes |
-| HTTP to upstream hosts | `HttpClient` or the Worker | no |
+| Open-Meteo forecast query | `forecast_url` and `OPEN_METEO` | yes |
+| Other HTTP to upstream hosts | `HttpClient` or the Worker | no |
 | Painted map | `compose_radar_map`, `compose_viewport`, or `RadarMap.tsx` | no |
 | Relief echo bands and ortho fit | `band_height` / `bandHeight`, `fit_ortho_half_extents` / `fitOrthoHalfExtents` | yes |
 | Hourly chart and daily range bar | `chart_points` / `chartPoints`, `range_placement` / `rangePlacement` | yes |
@@ -42,6 +43,8 @@ Query fields:
 - `wind_speed_unit=kmh`
 - `timezone=auto`
 - `forecast_days=10`
+
+`fixtures/contract.json` `open_meteo` holds that request as a base URL plus a canonical parameter map. Both contract tests compare their own client's forecast URL against it, so adding a field on one side only fails `pnpm test` or `cargo test -p coldfront-core`.
 
 A parsed forecast has one `Current`, hourly rows, and daily rows. The contract sample for ZIP 55115 has 240 hourly rows and 10 daily rows. Time strings are Open-Meteo local timestamps such as `2026-11-17T16:45`.
 

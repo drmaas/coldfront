@@ -21,6 +21,7 @@ Do not add applet UI here. Do not call `coldfront-core` from this package. Keep 
 - Accept only `GET` and `HEAD` on `/api/*`.
 - Keep cache lifetimes: ZIP and map tiles 86400 seconds, forecast 300, alerts 60, config and errors `no-store`.
 - Changing a function that the contract test imports requires the same Rust change and a `fixtures/contract.json` update.
+- `OPEN_METEO` in `lib/server/proxy.ts` must keep the same query as `forecast_url` in `coldfront-core`. `fixtures/contract.json` `open_meteo` locks it from both sides.
 - `chartPoints` and `rangePlacement` stay mirrored with `chart_points` and `range_placement` in Rust. Change both and the contract fixture together.
 - Unit changes read `localStorage` key `coldfront-units`. Do not refetch on °F / °C.
 - Theme preference reads `localStorage` key `coldfront-theme` (`light` | `dark` | `system`). Resolve `system` with `prefers-color-scheme` and set `data-theme` on `document.documentElement` to `light` or `dark` only.

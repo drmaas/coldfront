@@ -35,6 +35,7 @@ import {
   type EchoSample,
   type ReliefScene,
 } from "./radarRelief";
+import { radarAutoplays, reducedMotionQuery } from "./radarAutoplay";
 import { pinCssAt } from "./radarPin";
 import {
   fetchRadarLayers,
@@ -75,7 +76,7 @@ export function RadarMap({ latitude, longitude, basemap, timeZone }: RadarMapPro
   const [speed, setSpeed] = useState<RadarSpeed>(1);
   const frames = useMemo(() => webRadarFramesFor(lookback), [lookback]);
   const [index, setIndex] = useState(() => webRadarFramesFor(1).length - 1);
-  const [playing, setPlaying] = useState(true);
+  const [playing, setPlaying] = useState(() => radarAutoplays(reducedMotionQuery()));
   const [, setReadyTick] = useState(0);
   const [zoom, setZoom] = useState(6);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -567,6 +568,17 @@ export function RadarMap({ latitude, longitude, basemap, timeZone }: RadarMapPro
     });
     return undefined;
   }, [lookback, frames, latitude, longitude, basemap, sizeTick, lookbackKick]);
+
+  useEffect(() => {
+    const query = reducedMotionQuery();
+    if (!query) return undefined;
+    const onMotionChange = () => {
+      if (query.matches) setPlaying(false);
+    };
+    onMotionChange();
+    query.addEventListener("change", onMotionChange);
+    return () => query.removeEventListener("change", onMotionChange);
+  }, []);
 
   useEffect(() => {
     if (!playing) return undefined;

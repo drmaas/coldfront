@@ -2,6 +2,7 @@
 
 //! Both clients run these fixtures. The numbers live in `fixtures/contract.json`.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -9,11 +10,11 @@ use coldfront_core::{
     OrthoFit, RadarLookback, RadarSpeed, RouteTarget, applet_radar_frames_at,
     applet_radar_frames_for, applet_radar_interval_ms, band_height, chart_points, day_label,
     describe, display_icon, display_temperature, display_wind_mph, fit_ortho_half_extents,
-    format_as_of, format_clock_time, format_radar_clock, hour_label, iem_tile_url, is_us_zip,
-    is_zip_lookup, lat_lon_to_tile, location_path, next_hours, parse_alerts, parse_geocode_search,
-    parse_open_meteo, parse_route_path, parse_zippopotam, place_from_geocode_hit, range_placement,
-    round_half_away_from_zero, tile_window, web_radar_frames_at, web_radar_frames_for,
-    web_radar_interval_ms,
+    forecast_url, format_as_of, format_clock_time, format_radar_clock, hour_label, iem_tile_url,
+    is_us_zip, is_zip_lookup, lat_lon_to_tile, location_path, next_hours, parse_alerts,
+    parse_geocode_search, parse_open_meteo, parse_route_path, parse_zippopotam,
+    place_from_geocode_hit, range_placement, round_half_away_from_zero, tile_window,
+    web_radar_frames_at, web_radar_frames_for, web_radar_interval_ms,
 };
 use serde_json::Value;
 
@@ -31,6 +32,35 @@ fn contract() -> Value {
 
 fn close(actual: f64, expected: f64) {
     assert!((actual - expected).abs() < 0.001, "{actual} != {expected}");
+}
+
+fn query_params(query: &str) -> BTreeMap<String, String> {
+    query
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| match pair.split_once('=') {
+            Some((key, value)) => (key.to_string(), value.to_string()),
+            None => (pair.to_string(), String::new()),
+        })
+        .collect()
+}
+
+#[test]
+fn open_meteo_forecast_query_matches_the_contract() {
+    let contract = contract();
+    let spec = &contract["open_meteo"];
+    let url = forecast_url(45.071, -92.9391);
+    let (base, query) = url.split_once('?').expect("forecast url has a query");
+    assert_eq!(base, spec["base"].as_str().unwrap());
+    let mut expected: BTreeMap<String, String> = spec["params"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(key, value)| (key.clone(), value.as_str().unwrap().to_string()))
+        .collect();
+    expected.insert("latitude".into(), "45.071".into());
+    expected.insert("longitude".into(), "-92.9391".into());
+    assert_eq!(query_params(query), expected);
 }
 
 #[test]

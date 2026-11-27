@@ -21,7 +21,7 @@ pub mod zipcode;
 
 pub use alerts::{Alert, parse_alerts};
 pub use chart::{ChartPoint, RangePlacement, chart_points, range_placement};
-pub use client::HttpClient;
+pub use client::{HttpClient, forecast_url};
 pub use error::Error;
 pub use forecast::{
     Day, Forecast, Hour, day_label, format_as_of, format_clock_time, format_precip_amount_mm,
